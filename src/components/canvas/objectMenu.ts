@@ -10,6 +10,7 @@ export function objectMenuItems(id: string): MenuItem[] {
   // Действие всегда применяется к объекту, по которому кликнули
   const run = (action: (s: ReturnType<typeof useScene.getState>) => void) => () => {
     const s = useScene.getState()
+    if (!s.scene.objects.some((o) => o.id === id)) return // объект удалили, пока меню было открыто
     s.select(id)
     action(useScene.getState())
   }

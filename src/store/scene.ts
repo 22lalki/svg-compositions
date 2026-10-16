@@ -130,6 +130,7 @@ export const useScene = create<SceneState>()((set, get) => ({
       rotation: 0,
       flipX: false,
     }
+    if (get().gestureBase) return id // во время жеста правки не применяются — и выделять нечего
     get().commit((s) => ({ ...s, objects: [...s.objects, obj] }))
     set({ selectedId: id })
     return id
@@ -141,7 +142,8 @@ export const useScene = create<SceneState>()((set, get) => ({
   removeSelected: () => {
     const { selectedId, gestureBase } = get()
     if (!selectedId || gestureBase) return
-    get().commit((s) => ({ ...s, objects: s.objects.filter((o) => o.id !== selectedId) }))
+    // Объект могли удалить в другой вкладке, пока было открыто меню: пустой шаг истории не нужен
+    get().commit((s) => (s.objects.some((o) => o.id === selectedId) ? { ...s, objects: s.objects.filter((o) => o.id !== selectedId) } : s))
     set({ selectedId: null })
   },
 
@@ -160,7 +162,7 @@ export const useScene = create<SceneState>()((set, get) => ({
 
   flipSelected: () => {
     const { selectedId } = get()
-    if (selectedId) get().commit((s) => mapObject(s, selectedId, (o) => ({ ...o, flipX: !o.flipX })))
+    if (selectedId) get().commit((s) => (s.objects.some((o) => o.id === selectedId) ? mapObject(s, selectedId, (o) => ({ ...o, flipX: !o.flipX })) : s))
   },
 
   reorderSelected: (op) => {

@@ -869,6 +869,25 @@ check('undo после удаления компонента не возвращ
     `${seenIn2} / ${seenIn1} / ${afterReload.join(', ')}`,
   )
 
+  // Компонент удалили в другой вкладке: здесь Ctrl+Z не возвращает его «битый» объект
+  const tab3 = await context.newPage()
+  await tab3.goto(BASE)
+  await tab3.waitForSelector('[data-component-id]')
+  const victim = await page.locator('[data-component-id]').nth(2).getAttribute('data-component-id')
+  await tab3.locator(`[data-component-id="${victim}"]`).click()
+  await tab3.waitForSelector('[data-layer-id]')
+  await tab3.keyboard.press('Delete')
+  await tab3.waitForFunction(() => !document.querySelector('[data-layer-id]'))
+  await page.locator(`[data-component-id="${victim}"]`).click({ button: 'right' })
+  await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Удалить' }).click()
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Удалить', exact: true }).click()
+  await tab3.waitForFunction((id) => !document.querySelector(`[data-component-id="${id}"]`), victim)
+  await tab3.keyboard.press('Control+z')
+  await tab3.waitForTimeout(200)
+  const orphans = await tab3.locator('[data-layer-id]').count()
+  await tab3.close()
+  check('две вкладки: компонент удален в другой — Ctrl+Z не возвращает его объект', orphans === 0, String(orphans))
+
   // Битые записи: отдельный браузерный профиль, в хранилище — мусор вперемешку с целыми записями
   const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const p = await fresh.newPage()

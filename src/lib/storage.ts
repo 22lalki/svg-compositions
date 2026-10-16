@@ -32,8 +32,15 @@ async function read<T>(key: StorageKey): Promise<T | undefined> {
 /** Другие вкладки сервиса: после записи они перечитывают ключ, а не затирают его своей старой копией */
 const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('svg-constructor') : null
 
+/**
+ * Связанные ключи: сцена ссылается на компоненты, компоненты — на библиотеки. Если не прочитался любой из них,
+ * пишем ни в один: иначе запись сцены без «пропавших» компонентов стерла бы ее объекты,
+ * а запись компонентов — их библиотеки
+ */
+const LINKED: readonly StorageKey[] = [KEYS.components, KEYS.libraries, KEYS.scene]
+
 async function write(key: StorageKey, value: unknown) {
-  if (unreadable.has(key)) return
+  if (unreadable.has(key) || (LINKED.includes(key) && LINKED.some((k) => unreadable.has(k)))) return
   await set(key, value, store)
   channel?.postMessage({ key })
 }
@@ -77,14 +84,16 @@ const toLibrary = (l: Record<string, unknown>): Library | null =>
 
 const toSceneObject = (o: Record<string, unknown>): SceneObject | null => {
   if (!str(o.id) || !str(o.componentId)) return null
-  const scale = finite(o.scale, 1)
+  // Масштаб 0 или отрицательный (поврежденная запись) дал бы деление на ноль у ручек
+  const positive = (v: unknown, fallback: number) => (finite(v, 0) > 0 ? (v as number) : fallback)
+  const scale = positive(o.scale, 1)
   return {
     id: o.id,
     componentId: o.componentId,
     x: finite(o.x, 0),
     y: finite(o.y, 0),
     scale,
-    scaleY: finite(o.scaleY, scale),
+    scaleY: positive(o.scaleY, scale),
     rotation: finite(o.rotation, 0),
     flipX: o.flipX === true,
   }

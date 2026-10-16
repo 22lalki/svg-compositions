@@ -65,6 +65,8 @@ function startAutosave() {
     saveScene(s.scene).catch((e: unknown) => console.error('Не удалось сохранить сцену', e))
   })
   const applyExternal = (scene: Scene) => {
+    // Здесь идет жест (перетаскивание, ручки): не обрываем его. Его итог сохранится и уйдет в ту вкладку
+    if (useScene.getState().gestureBase) return
     saved = scene
     useScene.getState().init(scene)
   }
@@ -77,10 +79,13 @@ function startSync(applyScene: (scene: Scene) => void) {
     const reload = async () => {
       if (key === 'components' || key === 'libraries') {
         const [components, libraries] = await Promise.all([loadComponents(), loadLibraries()])
+        // Компоненты, удаленные в другой вкладке, убираем и из здешней истории: иначе Ctrl+Z вернул бы «битый» объект
+        const kept = new Set(components.map((c) => c.id))
+        for (const c of useLibrary.getState().components) if (!kept.has(c.id)) useScene.getState().purgeComponent(c.id)
         useLibrary.getState().init(components, libraries)
       } else if (key === 'userSources') {
-        const ui = useUi.getState()
         const user = await loadUserSources()
+        const ui = useUi.getState() // состояние после ожидания, а не до него
         ui.initSources(ui.builtinSources, user)
         const open = ui.extractSourceId
         // Открытый здесь загруженный файл удалили в другой вкладке
@@ -90,7 +95,10 @@ function startSync(applyScene: (scene: Scene) => void) {
         if (scene) applyScene(scene)
       }
     }
-    reload().catch((e: unknown) => console.error('Не удалось принять изменения из другой вкладки', e))
+    reload().catch((e: unknown) => {
+      console.error(e)
+      notify('Не удалось принять изменения из другой вкладки. Чтобы ничего не затереть, сохранение приостановлено: перезагрузите страницу', 'error')
+    })
   })
 }
 
