@@ -52,8 +52,7 @@ npm run build      # tsc (strict) + vite build → dist/
 
 `public/sources/01.svg … 20.svg` и `manifest.json` (`id`, `title`, `file`, `originalName`).
 
-- **01–19** — [unDraw](https://undraw.co) (автор — Katerina Limpitsouni). Лицензия unDraw разрешает бесплатное коммерческое и личное использование без указания авторства.
-- **20 «Кардиограмма»** — иконка с [SVG Repo](https://www.svgrepo.com) (`electrocardiogram-svgrepo-com.svg`), не из unDraw. В примерах не используется.
+Все 20 — из [unDraw](https://undraw.co), одного автора (Katerina Limpitsouni) и в одном стиле: плоские фигуры, общая палитра с фиолетовым акцентом `#6c63ff`. Лицензия unDraw разрешает бесплатное коммерческое и личное использование без указания авторства.
 
 Файлы лежат как есть, без ручной подготовки. Опциональный `scripts/normalize.ts` (SVGO) не понадобился: самопроверка ниже показывает, что извлечение из исходных файлов совпадает с оригиналом попиксельно.
 
