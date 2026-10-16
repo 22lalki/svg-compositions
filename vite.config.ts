@@ -12,7 +12,7 @@ const securityHeaders = Object.fromEntries(vercel.headers.flatMap((h) => h.heade
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    // Сценарии пишут сюда SVG/PNG/видео — dev-страница не должна из-за этого перезагружаться
+    // Сценарии пишут сюда SVG и PNG — dev-страница не должна из-за этого перезагружаться
     watch: { ignored: ['**/examples/**', '**/scripts/**'] },
   },
   preview: { headers: securityHeaders },

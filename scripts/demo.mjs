@@ -1,15 +1,13 @@
 // Сквозной сценарий через настоящий UI (Playwright):
 //   извлечение компонентов рамкой → сборка трех композиций → экспорт в examples/ → проверки чек-листа.
 // Запуск (dev-сервер должен работать):  node scripts/demo.mjs            — композиции + проверки
-//                                        node scripts/demo.mjs --video    — запись демо-видео (examples/demo.webm)
 import { chromium } from 'playwright'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173'
-const VIDEO = process.argv.includes('--video')
 const EXAMPLES = process.env.EXAMPLES_DIR ? path.resolve(process.env.EXAMPLES_DIR) : path.join(ROOT, 'examples')
 const OUT = path.join(ROOT, 'scripts', '.out')
 mkdirSync(EXAMPLES, { recursive: true })
@@ -86,42 +84,11 @@ const COMPOSITIONS = [
 
 /* ---------- Браузер ---------- */
 
-const CURSOR_SCRIPT = `(() => {
-  const install = () => {
-    if (document.getElementById('__cursor')) return
-    const c = document.createElement('div')
-    c.id = '__cursor'
-    c.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 2l6.5 19 2.6-7.6L21 11z" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>'
-    Object.assign(c.style, { position: 'fixed', left: '0', top: '0', zIndex: 2147483647, pointerEvents: 'none', transform: 'translate(-100px,-100px)' })
-    document.body.appendChild(c)
-    const cap = document.createElement('div')
-    Object.assign(cap.style, { position: 'fixed', left: '50%', top: '9px', transform: 'translateX(-50%)', zIndex: 2147483646, pointerEvents: 'none',
-      background: 'rgba(31,35,48,.94)', color: '#fff', font: '600 15px/1.3 Segoe UI, Inter, sans-serif', padding: '7px 16px', borderRadius: '10px',
-      opacity: '0', transition: 'opacity .25s', whiteSpace: 'nowrap' })
-    document.body.appendChild(cap)
-    window.__caption = (t) => { if (t) cap.textContent = t; cap.style.opacity = t ? '1' : '0' }
-    const move = (e) => { c.style.transform = 'translate(' + (e.clientX - 4) + 'px,' + (e.clientY - 2) + 'px)' }
-    for (const t of ['pointermove', 'mousemove', 'dragover', 'drag']) window.addEventListener(t, move, true)
-    window.addEventListener('pointerdown', (e) => {
-      const r = document.createElement('div')
-      Object.assign(r.style, { position: 'fixed', left: e.clientX - 12 + 'px', top: e.clientY - 12 + 'px', width: '24px', height: '24px', borderRadius: '50%',
-        background: 'rgba(108,99,255,.4)', zIndex: 2147483645, pointerEvents: 'none', transition: 'transform .4s, opacity .4s' })
-      document.body.appendChild(r)
-      requestAnimationFrame(() => { r.style.transform = 'scale(2.2)'; r.style.opacity = '0' })
-      setTimeout(() => r.remove(), 450)
-    }, true)
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install)
-  else install()
-})()`
-
 const browser = await chromium.launch()
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   acceptDownloads: true,
-  recordVideo: VIDEO ? { dir: OUT, size: { width: 1440, height: 900 } } : undefined,
 })
-if (VIDEO) await context.addInitScript(CURSOR_SCRIPT)
 const page = await context.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
@@ -129,13 +96,8 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 let navigations = 0
 page.on('framenavigated', (fr) => fr === page.mainFrame() && navigations++)
 
-const wait = (ms) => page.waitForTimeout(VIDEO ? ms : Math.min(ms, 80))
-const steps = (n) => (VIDEO ? n : 2)
-async function caption(text, ms = 0) {
-  if (!VIDEO) return
-  await page.evaluate((t) => window.__caption?.(t), text)
-  if (ms) await wait(ms)
-}
+/** Паузы короткие: интерфейсу хватает, а сценарий идет быстро */
+const wait = (ms) => page.waitForTimeout(Math.min(ms, 80))
 
 /* ---------- Режим выделения ---------- */
 
@@ -159,10 +121,10 @@ async function openSource(id) {
 async function marquee([x0, y0, x1, y1], modifier) {
   const a = await srcToClient(x0, y0)
   const b = await srcToClient(x1, y1)
-  await page.mouse.move(a.x, a.y, { steps: steps(15) })
+  await page.mouse.move(a.x, a.y, { steps: 2 })
   if (modifier) await page.keyboard.down(modifier)
   await page.mouse.down()
-  await page.mouse.move(b.x, b.y, { steps: steps(35) })
+  await page.mouse.move(b.x, b.y, { steps: 2 })
   await page.mouse.up()
   if (modifier) await page.keyboard.up(modifier)
   await wait(400)
@@ -172,8 +134,7 @@ async function saveComponent(name) {
   const input = page.getByLabel('Название компонента')
   await input.click()
   await input.fill('')
-  if (VIDEO) await input.pressSequentially(name, { delay: 45 })
-  else await input.fill(name)
+  await input.fill(name)
   await wait(300)
   await page.getByRole('button', { name: 'Сохранить в библиотеку' }).click()
   await page.waitForSelector(`[data-component-id][data-name="${name}"]`)
@@ -187,7 +148,7 @@ async function extract(key) {
   await marquee(spec.rect)
   for (const r of spec.subtract ?? []) await marquee(r, 'Alt')
   const count = await page.textContent('[data-testid="selection-count"]')
-  if (!VIDEO) console.log(`  ${key}: ${count}`)
+  console.log(`  ${key}: ${count}`)
   if (!(await page.$('[data-testid="component-preview"]'))) await page.screenshot({ path: path.join(OUT, `fail-${key}.png`) })
   await page.locator('[data-testid="component-preview"]').screenshot({ path: path.join(OUT, `preview-${key}.png`) })
   await saveComponent(spec.name)
@@ -233,10 +194,10 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
 async function dragBoard(from, to, modifier) {
   const a = await boardToClient(from.x, from.y)
   const b = await boardToClient(to.x, to.y)
-  await page.mouse.move(a.x, a.y, { steps: steps(10) })
+  await page.mouse.move(a.x, a.y, { steps: 2 })
   if (modifier) await page.keyboard.down(modifier)
   await page.mouse.down()
-  await page.mouse.move(b.x, b.y, { steps: steps(30) })
+  await page.mouse.move(b.x, b.y, { steps: 2 })
   await page.mouse.up()
   if (modifier) await page.keyboard.up(modifier)
   await wait(300)
@@ -248,7 +209,7 @@ async function dropComponent(name, cx, cy) {
   const canvas = page.locator('[data-testid="canvas"]')
   const box = await canvas.boundingBox()
   const p = await boardToClient(cx, cy)
-  await card.dragTo(canvas, { targetPosition: { x: p.x - box.x, y: p.y - box.y }, steps: steps(25) })
+  await card.dragTo(canvas, { targetPosition: { x: p.x - box.x, y: p.y - box.y }, steps: 2 })
   await wait(400)
 }
 
@@ -293,9 +254,9 @@ async function grabPoint() {
 async function moveSelectedBy(dx, dy) {
   const g = await grabPoint()
   const zoom = await page.evaluate(() => document.querySelector('[data-testid="canvas"] svg').getScreenCTM().a)
-  await page.mouse.move(g.x, g.y, { steps: steps(10) })
+  await page.mouse.move(g.x, g.y, { steps: 2 })
   await page.mouse.down()
-  await page.mouse.move(g.x + dx * zoom, g.y + dy * zoom, { steps: steps(30) })
+  await page.mouse.move(g.x + dx * zoom, g.y + dy * zoom, { steps: 2 })
   await page.mouse.up()
   await wait(300)
 }
@@ -402,126 +363,6 @@ function inspectExport(svg, expectedObjects) {
 await page.goto(BASE)
 await page.waitForSelector('[data-source-id="01"]')
 await wait(1200)
-
-if (VIDEO) {
-  // Демо-сценарий: исходник → выделение → библиотека → композиция из 3+ исходников → экспорт
-  await caption('Открываем исходник 02 «Игра с собакой» — он рендерится инлайном', 900)
-  await openSource('02')
-  await wait(700)
-  await caption('Наведение подсвечивает объект целиком, клик выделяет его: девушка из 14 фигур')
-  const torso = await srcToClient(230, 150)
-  await page.mouse.move(torso.x, torso.y, { steps: 25 })
-  await wait(1000)
-  await page.mouse.click(torso.x, torso.y)
-  await wait(1200)
-  await caption('Двойной клик — режим элементов: отдельная фигура, Shift+клик добавляет следующую')
-  const head = await srcToClient(215, 45)
-  await page.mouse.dblclick(torso.x, torso.y)
-  await wait(900)
-  await page.keyboard.down('Shift')
-  await page.mouse.move(head.x, head.y, { steps: 15 })
-  await page.mouse.click(head.x, head.y)
-  await page.keyboard.up('Shift')
-  await wait(1200)
-  await caption('↑ — обратно к объекту целиком. Справа — живое превью, сохраняем в библиотеку')
-  await page.keyboard.press('ArrowUp')
-  await wait(1200)
-  await saveComponent(C.woman.name)
-  await caption('Собака и косточка (повернута через matrix): клик + Shift+клик по второму объекту')
-  const dogBody = await srcToClient(440, 400)
-  const bone = await srcToClient(346, 255)
-  await page.mouse.move(dogBody.x, dogBody.y, { steps: 20 })
-  await page.mouse.click(dogBody.x, dogBody.y)
-  await wait(700)
-  await page.keyboard.down('Shift')
-  await page.mouse.move(bone.x, bone.y, { steps: 15 })
-  await page.mouse.click(bone.x, bone.y)
-  await page.keyboard.up('Shift')
-  await wait(900)
-  await saveComponent(C.dog.name)
-
-  await caption('07 «Звездное окно» (градиент): рамка, затем Alt+рамка вычитает лишнее — голову персонажа', 300)
-  await openSource('07')
-  await marquee(C.window.rect)
-  await wait(500)
-  await marquee(C.window.subtract[0], 'Alt')
-  await wait(600)
-  await saveComponent(C.window.name)
-
-  await caption('11 «Фудтрак» (градиент): рамка + Alt-вычитание', 300)
-  await openSource('11')
-  await marquee(C.truck.rect)
-  await marquee(C.truck.subtract[0], 'Alt')
-  await wait(500)
-  await saveComponent(C.truck.name)
-
-  await caption('05 «Облака» и 16 «Звезды»', 300)
-  await openSource('05')
-  await marquee(C.cloudBig.rect)
-  await saveComponent(C.cloudBig.name)
-  await openSource('16')
-  await marquee(C.moon.rect)
-  await saveComponent(C.moon.name)
-  await openSource('14')
-  await marquee(C.ground.rect)
-  await saveComponent(C.ground.name)
-  await marquee(C.trees.rect)
-  await saveComponent(C.trees.name)
-
-  await backToCanvas()
-  await caption('Холст: перетаскиваем компоненты из библиотеки', 600)
-  const comp = COMPOSITIONS[0]
-  for (const item of comp.items.filter((i) => i.c !== 'cloudSmall')) {
-    if (item.c === 'woman') await caption('Масштаб за угловую ручку — от центра, пропорционально')
-    await place(item)
-  }
-  await caption('Поворот за верхнюю ручку, Shift — шаг 15°')
-  await page.locator('[data-layer-id]').first().click() // собака — верхний слой
-  await rotateSelected(-15)
-  await wait(700)
-  await caption('Ctrl+D — дубликат, Shift+стрелки — сдвиг на 10px, кнопка — отражение')
-  await page.locator('[data-layer-id]', { hasText: 'Деревья' }).click()
-  await page.keyboard.press('Control+d')
-  await wait(400)
-  for (let i = 0; i < 18; i++) {
-    await page.keyboard.press('Shift+ArrowRight')
-    await wait(40)
-  }
-  await page.getByRole('button', { name: 'Отразить по горизонтали' }).click()
-  await wait(700)
-  await caption('Порядок слоев: кнопки или перетаскивание в панели «Слои»')
-  await page.getByRole('button', { name: 'На задний план' }).click()
-  await wait(900)
-  await caption('Undo / Redo — Ctrl+Z / Ctrl+Shift+Z')
-  for (let i = 0; i < 4; i++) {
-    await page.keyboard.press('Control+z')
-    await wait(450)
-  }
-  for (let i = 0; i < 4; i++) {
-    await page.keyboard.press('Control+Shift+z')
-    await wait(450)
-  }
-  await caption('Экспорт: чистый векторный SVG, объекты — отдельные группы')
-  await wait(600)
-  const svg = await exportSvg('demo-composition')
-  await wait(1200)
-  await caption('Перезагрузка: библиотека и сцена восстанавливаются из IndexedDB', 300)
-  await page.reload()
-  await page.waitForSelector('[data-testid="canvas"] svg')
-  await wait(2200)
-  await caption('Скачанный файл, открытый в браузере', 300)
-  await page.goto(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
-  await wait(3000)
-  await page.close()
-  const video = page.video()
-  await context.close()
-  const src = await video.path()
-  renameSync(src, path.join(EXAMPLES, 'demo.webm'))
-  rmSync(path.join(EXAMPLES, 'demo-composition.svg'), { force: true })
-  console.log('Видео: examples/demo.webm')
-  await browser.close()
-  process.exit(0)
-}
 
 // 1. Извлекаем все компоненты через UI
 const counts = {}
