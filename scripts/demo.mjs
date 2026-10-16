@@ -558,7 +558,7 @@ check('библиотека: все компоненты сохранены', (a
   await rightClickSrc(-4, -4)
   const disabledWhenEmpty =
     (await item('Снять выделение').isDisabled()) &&
-    (await item('Расширить до группы').isDisabled()) &&
+    (await item('Выделить всю группу').isDisabled()) &&
     (await item('Сохранить в библиотеку').isDisabled())
   await item('Выделить все').click()
   check('меню исходника: снять выделение / выделить все, пустое выделение блокирует пункты', disabledWhenEmpty && (await count()) === '30')

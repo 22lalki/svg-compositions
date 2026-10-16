@@ -441,7 +441,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         onSelect: () => setSelected((prev) => new Set(model.shapes.map((x) => x.index).filter((i) => !prev.has(i)))),
       },
       {
-        label: 'Расширить до группы',
+        label: 'Выделить всю группу',
         icon: 'parent',
         shortcut: '↑',
         disabled: !expanded,
@@ -557,7 +557,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           Выделено: {selected.size}
           {model ? ` из ${model.shapes.length}` : ''}
         </span>
-        <IconButton icon="parent" label="Расширить до родительской группы" shortcut="↑" onClick={expand} disabled={!selected.size} />
+        <IconButton icon="parent" label="Выделить всю группу" shortcut="↑" onClick={expand} disabled={!selected.size} />
         <IconButton icon="selectAll" label="Выделить все" shortcut="Ctrl+A" onClick={selectAll} disabled={!model} />
         <IconButton icon="x" label="Снять выделение" shortcut="Esc" onClick={() => setSelected(new Set())} disabled={!selected.size} />
         <IconButton
@@ -721,7 +721,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
                 <span className="px-6 text-center text-xs text-muted">Обведите рамкой персонажа или предмет</span>
               )}
             </div>
-            <dl className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px] text-muted">
+            <dl className="mt-2 grid grid-cols-2 gap-1 text-center text-[11px] text-muted">
               <div className="rounded bg-workspace/60 py-1">
                 <dt>фигур</dt>
                 <dd className="font-semibold text-ink">{preview?.shapeCount ?? 0}</dd>
@@ -729,10 +729,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
               <div className="rounded bg-workspace/60 py-1">
                 <dt>размер</dt>
                 <dd className="font-semibold text-ink">{preview ? `${Math.round(preview.width)}×${Math.round(preview.height)}` : '—'}</dd>
-              </div>
-              <div className="rounded bg-workspace/60 py-1">
-                <dt>defs</dt>
-                <dd className="font-semibold text-ink">{preview?.defsCount ?? 0}</dd>
               </div>
             </dl>
           </div>
