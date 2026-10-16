@@ -45,8 +45,11 @@ export function invert(m: Mat): Mat {
 }
 
 /** Средний линейный масштаб матрицы (для толщины обводки) */
-/** Наибольшее растяжение по осям: обводка в scale(4 1) толще по растянутой оси, средний масштаб ее недооценит */
-export const maxScale = (m: Mat) => Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3]))
+/**
+ * Насколько обводка радиуса 1 выступает по осям X и Y после матрицы: круг переходит в эллипс,
+ * его полуширина по X — длина строки (a, c), по Y — строки (b, d). Верно и для поворота с растяжением
+ */
+export const strokeReach = (m: Mat) => ({ x: Math.hypot(m[0], m[2]), y: Math.hypot(m[1], m[3]) })
 
 /** Нет поворота и скоса: bbox переносится точно по углам */
 export const isAxisAligned = (m: Mat) => Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9
@@ -87,8 +90,8 @@ export function unionRects(rects: Rect[]): Rect | null {
   ]))
 }
 
-export function inflate(r: Rect, d: number): Rect {
-  return { x: r.x - d, y: r.y - d, width: r.width + 2 * d, height: r.height + 2 * d }
+export function inflate(r: Rect, dx: number, dy = dx): Rect {
+  return { x: r.x - dx, y: r.y - dy, width: r.width + 2 * dx, height: r.height + 2 * dy }
 }
 
 export const rectContains = (outer: Rect, inner: Rect) =>

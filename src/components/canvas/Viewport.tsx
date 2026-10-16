@@ -11,7 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import type { Component, Point, Scene, SceneObject } from '../../types'
-import { sharedDefs } from '../../lib/exportSvg'
+import { usedComponents } from '../../lib/exportSvg'
 import { framePoint, normalizeAngle, objectFrame, objectTransform, rotateVec } from '../../lib/transform'
 import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
@@ -309,7 +309,7 @@ export function Viewport() {
     useScene.getState().addObject(comp, toArtboard(e.clientX, e.clientY))
   }
 
-  const defs = useMemo(() => sharedDefs(scene, components), [scene, components])
+  const defsOwners = useMemo(() => usedComponents(scene, components), [scene, components])
   const selected = scene.objects.find((o) => o.id === selectedId)
   const selectedComp = selected ? components.get(selected.componentId) : undefined
 
@@ -347,7 +347,10 @@ export function Viewport() {
           onPointerDown={onPointerDown}
           onContextMenu={onContextMenu}
         >
-          <SvgMarkup markup={defs} defs />
+          {/* Defs каждого компонента — отдельной группой: испорченная разметка одного не обнулит остальные */}
+          <defs>
+            {defsOwners.map((c) => (c.defs ? <SvgMarkup key={c.id} markup={c.defs} /> : null))}
+          </defs>
           <rect
             data-artboard=""
             width={scene.width}
@@ -434,12 +437,12 @@ const ObjectView = memo(function ObjectView({
  * Разметка компонента вставляется готовыми узлами SVG (разбор XML + очистка, см. lib/markup.ts), а не через
  * innerHTML. Пересобирается только при смене разметки, не при перемещении
  */
-const SvgMarkup = memo(function SvgMarkup({ markup, defs = false }: { markup: string; defs?: boolean }) {
-  const ref = useRef<SVGGElement & SVGDefsElement>(null)
+const SvgMarkup = memo(function SvgMarkup({ markup }: { markup: string }) {
+  const ref = useRef<SVGGElement>(null)
   useLayoutEffect(() => {
     ref.current?.replaceChildren(...svgNodes(markup))
   }, [markup])
-  return defs ? <defs ref={ref} /> : <g ref={ref} />
+  return <g ref={ref} />
 })
 
 const CORNERS: Array<[number, number]> = [

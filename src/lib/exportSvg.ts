@@ -4,14 +4,18 @@ import { cleanMarkup } from './markup'
 import { escapeXml, SVG_NS, XLINK_NS } from './svg'
 import { objectTransform } from './transform'
 
-/** Defs всех использованных компонентов, каждого ровно один раз (по componentId) */
-export function sharedDefs(scene: Scene, components: ReadonlyMap<string, Component>): string {
-  const used = new Set(scene.objects.map((o) => o.componentId))
-  return Array.from(used)
+/** Использованные на сцене компоненты, каждый ровно один раз (по componentId) */
+export function usedComponents(scene: Scene, components: ReadonlyMap<string, Component>): Component[] {
+  return Array.from(new Set(scene.objects.map((o) => o.componentId)))
     .sort()
-    .map((id) => components.get(id)?.defs ?? '')
-    .join('')
+    .flatMap((id) => components.get(id) ?? [])
 }
+
+/** Defs всех использованных компонентов; каждый очищается отдельно — испорченный не обнулит остальные */
+export const sharedDefs = (scene: Scene, components: ReadonlyMap<string, Component>): string =>
+  usedComponents(scene, components)
+    .map((c) => cleanMarkup(c.defs))
+    .join('')
 
 /**
  * Итоговый SVG: viewBox артборда, общий <defs>, белый фон,
@@ -20,7 +24,7 @@ export function sharedDefs(scene: Scene, components: ReadonlyMap<string, Compone
 export function buildExportSvg(scene: Scene, components: ReadonlyMap<string, Component>): string {
   const w = fmt(scene.width)
   const h = fmt(scene.height)
-  const defs = cleanMarkup(sharedDefs(scene, components))
+  const defs = sharedDefs(scene, components)
   const lines = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="${SVG_NS}" xmlns:xlink="${XLINK_NS}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
@@ -31,7 +35,7 @@ export function buildExportSvg(scene: Scene, components: ReadonlyMap<string, Com
     const c = components.get(o.componentId)
     if (!c) continue
     lines.push(
-      `  <g id="obj-${o.id}" data-component="${escapeXml(c.id)}" data-name="${escapeXml(c.name)}" ` +
+      `  <g id="obj-${escapeXml(o.id)}" data-component="${escapeXml(c.id)}" data-name="${escapeXml(c.name)}" ` +
         `transform="${objectTransform(o, c)}">${cleanMarkup(c.markup)}</g>`,
     )
   }

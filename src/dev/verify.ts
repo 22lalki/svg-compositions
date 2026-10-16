@@ -63,24 +63,34 @@ function diffImage(pa: Uint8ClampedArray, pb: Uint8ClampedArray, w: number, h: n
         const o = (y * w * 3 + x + k * w) * 4
         img.data.set(src.subarray(i, i + 4), o)
       }
-      const d = Math.max(Math.abs(pa[i]! - pb[i]!), Math.abs(pa[i + 1]! - pb[i + 1]!), Math.abs(pa[i + 2]! - pb[i + 2]!))
       const o = (y * w * 3 + x + 2 * w) * 4
-      img.data.set(d > 48 ? [255, 0, 0, 255] : [235, 235, 235, 255], o)
+      img.data.set(pixelDiff(pa, pb, i) > 48 ? [255, 0, 0, 255] : [235, 235, 235, 255], o)
     }
   }
   ctx.putImageData(img, 0, 0)
   return canvas.toDataURL('image/png')
 }
 
+/**
+ * Растр на прозрачном фоне: на белом почти белые фигуры unDraw (#f2f2f2, #e6e6e6 — треть всех фигур)
+ * отличались бы от пустоты меньше порога, и пропажу такой фигуры сравнение не заметило бы
+ */
 function rasterize(img: HTMLImageElement, w: number, h: number): Uint8ClampedArray {
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, w, h)
   ctx.drawImage(img, 0, 0, w, h)
   return ctx.getImageData(0, 0, w, h).data
+}
+
+/** Различие пикселей: цвет с учетом прозрачности и сама прозрачность (0…255) */
+function pixelDiff(pa: Uint8ClampedArray, pb: Uint8ClampedArray, i: number): number {
+  const aa = pa[i + 3]!
+  const ab = pb[i + 3]!
+  let d = Math.abs(aa - ab)
+  for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs((pa[i + k]! * aa) / 255 - (pb[i + k]! * ab) / 255))
+  return d
 }
 
 async function runCase(model: SourceModel, mode: string, indices: number[]): Promise<CaseResult | null> {
@@ -131,15 +141,13 @@ async function runCase(model: SourceModel, mode: string, indices: number[]): Pro
   let diff = 0
   let outside = 0
   for (let i = 0; i < pa.length; i += 4) {
-    const da = Math.max(Math.abs(pa[i]! - 255), Math.abs(pa[i + 1]! - 255), Math.abs(pa[i + 2]! - 255))
-    if (da > 8) {
+    if (pa[i + 3]! > 8) {
       painted++
       const x = (i / 4) % w
       const y = Math.floor(i / 4 / w)
       if (x < inner.x0 || x > inner.x1 || y < inner.y0 || y > inner.y1) outside++
     }
-    const d = Math.max(Math.abs(pa[i]! - pb[i]!), Math.abs(pa[i + 1]! - pb[i + 1]!), Math.abs(pa[i + 2]! - pb[i + 2]!))
-    if (d > 48) diff++
+    if (pixelDiff(pa, pb, i) > 48) diff++
   }
   if (DUMP) dump[model.meta.id + ':' + mode]!.png = diffImage(pa, pb, w, h)
 
@@ -268,8 +276,8 @@ async function verifyFixture(name: string, text: string, host: HTMLElement): Pro
   let painted = 0
   let diff = 0
   for (let i = 0; i < pa.length; i += 4) {
-    if (Math.max(255 - pa[i]!, 255 - pa[i + 1]!, 255 - pa[i + 2]!) > 8) painted++
-    if (Math.max(Math.abs(pa[i]! - pb[i]!), Math.abs(pa[i + 1]! - pb[i + 1]!), Math.abs(pa[i + 2]! - pb[i + 2]!)) > 48) diff++
+    if (pa[i + 3]! > 8) painted++
+    if (pixelDiff(pa, pb, i) > 48) diff++
   }
   const out = [row(source, 'normalize', diff, painted)]
   // 2) Извлечение из нормализованного файла

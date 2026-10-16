@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Экспорт Illustrator с «сохранением возможностей редактирования»: рисунок внутри <switch>,
+     первым вариантом идет <foreignObject> с данными редактора -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" xmlns:x="http://ns.adobe.com/Extensibility/1.0/" viewBox="0 0 200 160" width="200" height="160">
+  <switch>
+    <foreignObject requiredExtensions="http://ns.adobe.com/AdobeIllustrator/10.0/" x="0" y="0" width="1" height="1">
+      <i:pgfRef xlink:href="#adobe_illustrator_pgf" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    </foreignObject>
+    <g i:extraneous="self">
+      <rect x="10" y="10" width="90" height="90" rx="12" fill="#6c63ff"/>
+      <circle cx="140" cy="100" r="40" fill="#ff6584"/>
+      <path d="M20 140 L180 140" stroke="#3f3d56" stroke-width="6"/>
+    </g>
+  </switch>
+</svg>

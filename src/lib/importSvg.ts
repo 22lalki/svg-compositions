@@ -20,7 +20,7 @@ export class SvgImportError extends Error {}
  * Белый список надежнее черного: неизвестное по умолчанию запрещено
  */
 const ALLOWED_ELEMENTS = new Set([
-  'svg', 'g', 'defs', 'symbol', 'use', 'a', 'style', 'title', 'desc',
+  'svg', 'g', 'defs', 'symbol', 'use', 'a', 'switch', 'style', 'title', 'desc',
   'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'image',
   'text', 'tspan', 'textPath',
   'linearGradient', 'radialGradient', 'stop', 'pattern', 'clipPath', 'mask', 'marker',
@@ -141,6 +141,22 @@ export function sanitizeSvg(root: Element, { keepStyles = true } = {}) {
       }
     }
   }
+  // <switch> (Illustrator: <foreignObject> с данными редактора + <g> с рисунком) → <g> с первым вариантом,
+  // который показал бы браузер. Остальные варианты не рисуются и не должны стать фигурами
+  for (const sw of Array.from(root.querySelectorAll('switch')).reverse()) {
+    const lang = (typeof navigator !== 'undefined' ? navigator.language : 'en').toLowerCase()
+    const shown = (el: Element) => {
+      if (el.hasAttribute('requiredExtensions')) return false
+      const langs = el.getAttribute('systemLanguage')
+      return !langs || langs.split(',').some((l) => lang.startsWith(l.trim().toLowerCase().split('-')[0]!))
+    }
+    const children = Array.from(sw.children)
+    const pick = children.find(shown) ?? children[0]
+    const g = doc.createElementNS(SVG_NS, 'g')
+    for (const attr of Array.from(sw.attributes)) g.setAttributeNS(attr.namespaceURI, attr.name, attr.value)
+    if (pick) g.append(pick)
+    sw.replaceWith(g)
+  }
   // <a> разворачиваем в <g>: ссылка не нужна, содержимое нужно
   for (const a of Array.from(root.querySelectorAll('a'))) {
     const g = doc.createElementNS(SVG_NS, 'g')
@@ -184,7 +200,42 @@ const STYLE_PROPS = [
   'paint-order',
   'vector-effect',
   'mix-blend-mode',
+  'flood-color',
+  'flood-opacity',
+  'lighting-color',
+  // Геометрия через CSS (.big { r: 40px }) — классы после переноса удаляются, без нее фигура изменится
+  'r',
+  'cx',
+  'cy',
+  'rx',
+  'ry',
+  'x',
+  'y',
+  'width',
+  'height',
 ]
+
+/** Наследуемые свойства: если значение пришло от родителя, переносить его на потомка не нужно */
+const INHERITED_STYLE = new Set([
+  'color',
+  'marker-start',
+  'marker-mid',
+  'marker-end',
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'stroke',
+  'stroke-width',
+  'stroke-opacity',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-miterlimit',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'visibility',
+  'clip-rule',
+  'paint-order',
+])
 
 /**
  * <style> и классы → inline-стили. Сравниваем вычисленные значения со стилями и без них:
@@ -206,10 +257,16 @@ function inlineStylesheets(svg: SVGSVGElement) {
   const styled = read()
   sheets.forEach((s) => s.remove())
   const plain = read()
+  const indexOf = new Map(elements.map((el, i) => [el as Element, i]))
   elements.forEach((el, i) => {
+    const parent = el.parentElement ? (indexOf.get(el.parentElement) ?? -1) : -1
     STYLE_PROPS.forEach((prop, j) => {
       const value = styled[i]![j]!
-      if (value !== plain[i]![j]) el.style.setProperty(prop, normalizeUrlRefs(value))
+      if (value === plain[i]![j]) return
+      // Значение просто унаследовано от родителя (своего у элемента нет): родитель получит его сам. Иначе
+      // содержимое <symbol> «застыло» бы с цветом из стилей и перестало наследовать fill от <use>
+      const inherited = INHERITED_STYLE.has(prop) && parent >= 0 && styled[parent]![j] === value && plain[parent]![j] === plain[i]![j]
+      if (!inherited) el.style.setProperty(prop, normalizeUrlRefs(value))
     })
     el.removeAttribute('class')
   })
@@ -268,6 +325,8 @@ function expandUses(svg: SVGSVGElement) {
       }
       const g = doc.createElementNS(SVG_NS, 'g')
       copyPresentation(use, g)
+      const useId = use.getAttribute('id')
+      if (useId) g.setAttribute('id', useId)
       const parts = [use.getAttribute('transform') ?? '']
       const x = num(use.getAttribute('x'))
       const y = num(use.getAttribute('y'))
@@ -355,7 +414,7 @@ export function prepareSvgText(text: string): { svgText: string; shapeCount: num
   const svg = document.importNode(parsed, true) as unknown as SVGSVGElement
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
-  host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1200px;height:900px;visibility:hidden;pointer-events:none'
+  host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1200px;height:900px;opacity:0;pointer-events:none'
   host.appendChild(svg)
   document.body.appendChild(host)
   try {

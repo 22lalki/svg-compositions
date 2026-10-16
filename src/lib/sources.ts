@@ -78,7 +78,7 @@ async function sameDrawing(model: SourceModel, id: string): Promise<boolean> {
   // Размеры и рамки фигур считает браузер — рисунок временно монтируется вне экрана
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
-  host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1200px;height:900px;visibility:hidden;pointer-events:none'
+  host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1200px;height:900px;opacity:0;pointer-events:none'
   host.appendChild(svg)
   document.body.appendChild(host)
   try {

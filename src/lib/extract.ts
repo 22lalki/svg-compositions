@@ -7,7 +7,7 @@ import {
   IDENTITY,
   inflate,
   isAxisAligned,
-  maxScale,
+  strokeReach,
   mul,
   rectCorners,
   toTransformString,
@@ -56,6 +56,8 @@ export type SourceShape = {
   bbox: Rect
   /** Углы локального bbox в координатах корня — контур подсветки (повернут вместе с фигурой) */
   outline: Point[]
+  /** Пустая геометрия (path d="" и т.п.): рамка — точка, пусть даже с обводкой; рамку выделения не раздувает */
+  empty: boolean
 }
 
 export type SourceModel = {
@@ -97,7 +99,8 @@ function isHidden(el: Element): boolean {
   for (let n: Element | null = el; n instanceof SVGElement; n = n.parentElement) {
     const display = n.style.getPropertyValue('display') || n.getAttribute('display')
     if (display?.trim() === 'none') return true
-    visibility ??= n.style.getPropertyValue('visibility') || n.getAttribute('visibility')
+    const own = (n.style.getPropertyValue('visibility') || n.getAttribute('visibility'))?.trim()
+    if (own && own !== 'inherit') visibility ??= own
   }
   return visibility?.trim() === 'hidden' || visibility?.trim() === 'collapse'
 }
@@ -126,7 +129,10 @@ function sampledBounds(el: SVGGeometryElement, m: Mat): Rect | null {
     const p = el.getPointAtLength((length * i) / steps)
     points.push(apply(m, { x: p.x, y: p.y }))
   }
-  return boundsOf(points)
+  // Крайняя точка контура может лежать между отсчетами — запас в полшага по каждой оси
+  const half = length / steps / 2
+  const reach = strokeReach(m)
+  return inflate(boundsOf(points), half * reach.x, half * reach.y)
 }
 
 function shapeBounds(el: SVGGeometryElement, m: Mat, local: Rect): Rect {
@@ -134,7 +140,10 @@ function shapeBounds(el: SVGGeometryElement, m: Mat, local: Rect): Rect {
   const cs = getComputedStyle(el)
   if (cs.stroke && cs.stroke !== 'none') {
     const sw = parseFloat(cs.strokeWidth) || 0
-    if (sw > 0) return inflate(geometry, (sw / 2) * maxScale(m))
+    if (sw > 0) {
+      const reach = strokeReach(m)
+      return inflate(geometry, (sw / 2) * reach.x, (sw / 2) * reach.y)
+    }
   }
   return geometry
 }
@@ -182,6 +191,7 @@ export function analyzeSource(svg: SVGSVGElement, meta: SourceMeta): SourceModel
       matrix,
       bbox: shapeBounds(el, matrix, local),
       outline: rectCorners(local).map((p) => apply(matrix, p)),
+      empty: local.width === 0 && local.height === 0,
     })
     shapeIndex.set(el, index)
   }
@@ -206,14 +216,14 @@ export function shapesInRect(model: SourceModel, r: Rect): number[] {
 }
 
 export function selectionBounds(model: SourceModel, selected: Iterable<number>): Rect | null {
-  const rects: Rect[] = []
+  const all: Array<{ bbox: Rect; empty: boolean }> = []
   for (const i of selected) {
     const s = model.shapes[i]
-    if (s) rects.push(s.bbox)
+    if (s) all.push(s)
   }
-  // Пустая геометрия (path d="") дает рамку 0×0 где-то в стороне — она не должна раздувать компонент
-  const real = rects.filter((r) => r.width > 0 || r.height > 0)
-  return unionRects(real.length ? real : rects)
+  // Пустая геометрия (path d="") дает рамку-точку где-то в стороне — она не должна раздувать компонент
+  const real = all.filter((s) => !s.empty)
+  return unionRects((real.length ? real : all).map((s) => s.bbox))
 }
 
 /**
