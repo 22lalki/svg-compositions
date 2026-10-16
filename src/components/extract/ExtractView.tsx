@@ -45,8 +45,16 @@ const marqueeMode = (e: { shiftKey: boolean; altKey: boolean }): MarqueeMode =>
   e.altKey ? 'subtract' : e.shiftKey ? 'add' : 'replace'
 
 /** «Собака», «Собака и косточка», «Девушка, собака и косточка» */
-const joinNames = (names: string[]) =>
-  names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} и ${names.at(-1)!.toLowerCase()}`
+const joinNames = (names: string[]) => {
+  if (names.length === 1) return names[0]!
+  // Внутри фразы — со строчной; аббревиатуры («VR-шлем», «НЛО») не трогаем
+  const inPhrase = (n: string) => (/^\p{Lu}\p{Ll}/u.test(n) ? n[0]!.toLowerCase() + n.slice(1) : n)
+  const [first, ...rest] = names
+  const tail = rest.map(inPhrase)
+  // Уже составные имена («Девушка и собака») — через запятую, без «и … и»
+  if (names.some((n) => n.includes(' и '))) return [first, ...tail].join(', ')
+  return `${[first, ...tail.slice(0, -1)].join(', ')} и ${tail.at(-1)}`
+}
 
 export function ExtractView({ sourceId }: { sourceId: string }) {
   const meta = useUi((s) => s.sources.find((x) => x.id === sourceId))

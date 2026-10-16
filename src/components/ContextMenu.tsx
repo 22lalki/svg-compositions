@@ -49,15 +49,19 @@ export function ContextMenuHost() {
       e.preventDefault()
       e.stopPropagation()
     }
+    // Колесо над меню прокручивает его (длинный список библиотек), в остальных местах — закрывает
+    const onWheel = (e: WheelEvent) => {
+      if (!ref.current?.contains(e.target as Node)) closeContextMenu()
+    }
     window.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('keydown', onKey, true)
-    window.addEventListener('wheel', closeContextMenu, true)
+    window.addEventListener('wheel', onWheel, true)
     window.addEventListener('resize', closeContextMenu)
     window.addEventListener('blur', closeContextMenu)
     return () => {
       window.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('wheel', closeContextMenu, true)
+      window.removeEventListener('wheel', onWheel, true)
       window.removeEventListener('resize', closeContextMenu)
       window.removeEventListener('blur', closeContextMenu)
     }
@@ -69,7 +73,7 @@ export function ContextMenuHost() {
       ref={ref}
       role="menu"
       data-testid="context-menu"
-      className="fixed z-50 min-w-52 rounded-lg border border-line bg-white py-1 text-sm shadow-xl"
+      className="scroll-thin fixed z-50 max-h-[calc(100vh-8px)] min-w-52 overflow-y-auto rounded-lg border border-line bg-white py-1 text-sm shadow-xl"
       style={{ left: pos?.left ?? menu.x, top: pos?.top ?? menu.y, visibility: pos ? 'visible' : 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}
     >

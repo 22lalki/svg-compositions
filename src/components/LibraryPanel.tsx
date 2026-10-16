@@ -380,8 +380,17 @@ const ComponentCard = memo(function ComponentCard({
         e.dataTransfer.setData(COMPONENT_MIME, c.id)
         e.dataTransfer.effectAllowed = 'copyMove'
       }}
-      className="group flex cursor-grab gap-2.5 rounded-lg border border-line bg-white p-2 transition hover:border-accent/60 hover:shadow-sm active:cursor-grabbing"
+      className="group flex cursor-grab gap-2.5 rounded-lg border border-line bg-white p-2 transition outline-accent hover:border-accent/60 hover:shadow-sm focus-visible:outline-2 active:cursor-grabbing"
       onClick={() => !editing && addToCanvas()}
+      // С клавиатуры: Tab до карточки, Enter или пробел — на холст, Shift+F10 — меню
+      role="button"
+      tabIndex={0}
+      aria-label={`${c.name}: добавить на холст`}
+      onKeyDown={(e) => {
+        if (editing || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        e.preventDefault()
+        addToCanvas()
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         if (editing) return

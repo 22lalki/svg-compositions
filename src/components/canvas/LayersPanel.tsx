@@ -8,7 +8,12 @@ import { objectMenuItems } from './objectMenu'
 
 const LAYER_MIME = 'application/x-scene-layer'
 
-/** Список объектов сверху вниз (как в Figma); перетаскивание меняет порядок слоев */
+const positionIn = (el: Element, clientY: number): 'above' | 'below' => {
+  const r = el.getBoundingClientRect()
+  return clientY < r.top + r.height / 2 ? 'above' : 'below'
+}
+
+/** Список объектов сверху вниз (как в Figma); перетаскивание меняет порядок слоев. С клавиатуры: Tab, Enter */
 export function LayersPanel() {
   const objects = useScene((s) => s.scene.objects)
   const selectedId = useScene((s) => s.selectedId)
@@ -27,7 +32,12 @@ export function LayersPanel() {
       {rows.length === 0 ? (
         <p className="px-3 text-xs text-muted">Пока пусто</p>
       ) : (
-        <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-2" data-testid="layers" onDragLeave={() => setDrop(null)}>
+        <ul
+          className="scroll-thin flex-1 overflow-y-auto px-2 pb-2"
+          data-testid="layers"
+          // dragleave всплывает и с дочерних элементов строки — сбрасываем, только когда курсор ушел из списка
+          onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDrop(null)}
+        >
           {rows.map((o) => {
             const c = components.get(o.componentId)
             const active = o.id === selectedId
@@ -43,23 +53,32 @@ export function LayersPanel() {
                 onDragOver={(e) => {
                   if (!e.dataTransfer.types.includes(LAYER_MIME)) return
                   e.preventDefault()
-                  const r = e.currentTarget.getBoundingClientRect()
-                  const position = e.clientY < r.top + r.height / 2 ? 'above' : 'below'
+                  const position = positionIn(e.currentTarget, e.clientY)
                   if (drop?.id !== o.id || drop.position !== position) setDrop({ id: o.id, position })
                 }}
                 onDrop={(e) => {
+                  // Позиция — по точке отпускания, а не по индикатору: он мог не успеть обновиться
                   const id = e.dataTransfer.getData(LAYER_MIME)
-                  if (id && drop) useScene.getState().moveLayer(id, o.id, drop.position)
+                  if (id) useScene.getState().moveLayer(id, o.id, positionIn(e.currentTarget, e.clientY))
                   setDrop(null)
                 }}
                 onDragEnd={() => setDrop(null)}
                 onClick={() => useScene.getState().select(o.id)}
+                role="button"
+                tabIndex={0}
+                aria-pressed={active}
+                aria-label={`Слой «${c?.name ?? 'компонент удален'}»`}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  useScene.getState().select(o.id)
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   useScene.getState().select(o.id)
                   openContextMenu(e.clientX, e.clientY, objectMenuItems(o.id))
                 }}
-                className={`relative flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm select-none ${
+                className={`relative flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm outline-accent select-none focus-visible:outline-2 ${
                   active ? 'bg-accent-soft text-accent-strong' : 'hover:bg-workspace'
                 }`}
               >

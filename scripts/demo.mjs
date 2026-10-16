@@ -195,7 +195,7 @@ async function extract(key) {
 }
 
 async function backToCanvas() {
-  await page.getByRole('button', { name: 'Холст' }).click()
+  await page.getByRole('button', { name: 'Холст', exact: true }).click()
   await page.waitForSelector('[data-testid="canvas"] svg')
   await wait(400)
 }
@@ -981,6 +981,12 @@ check('undo после удаления компонента не возвращ
   // Сдвиг на 1 px дает около +2%; прежний расчет от угла, а не от точки захвата, давал около 111%
   check('мышь: ручка масштаба без скачка на первом пикселе', scalePct >= 99 && scalePct <= 104, `${scalePct}%`)
   check('клавиатура: Esc закрывает диалог, выделение на холсте остается', dialogGone && !!selAfter && selBefore === selAfter, `${selBefore} → ${selAfter}`)
+  // Карточка библиотеки доступна с клавиатуры: Tab до нее, Enter — на холст
+  const layersBefore = await page.locator('[data-layer-id]').count()
+  await page.locator('[data-component-id]').first().focus()
+  await page.keyboard.press('Enter')
+  await wait(200)
+  check('клавиатура: Enter на карточке библиотеки добавляет компонент на холст', (await page.locator('[data-layer-id]').count()) === layersBefore + 1)
   await clearCanvas()
 }
 
