@@ -18,14 +18,15 @@ import {
 import { shortId } from '../../lib/ids'
 import { standaloneSvg, svgDataUrl } from '../../lib/svg'
 import { sanitizeSvg } from '../../lib/importSvg'
-import { loadSourceObjects, loadSourceText, type SourceObject } from '../../lib/sources'
+import { loadEditedObjects, loadSourceObjects, loadSourceText, partition, saveEditedObjects, type SourceObject } from '../../lib/sources'
+import { deleteObjectEdits } from '../../lib/storage'
 import { detectObjects } from '../../lib/objects'
 import { GENERAL_LIBRARY_NAME, libraryName, useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
 import { Button, Divider, IconButton } from '../ui'
 import { isTypingTarget } from '../../lib/dom'
-import { isDialogOpen } from '../../store/confirm'
+import { confirmDialog, isDialogOpen, promptDialog } from '../../store/confirm'
 import { mod, openContextMenu, type MenuItem } from '../../store/contextMenu'
 
 type MarqueeMode = 'replace' | 'add' | 'subtract'
@@ -42,6 +43,10 @@ const rectFrom = (a: Point, b: Point): Rect => ({
 
 const marqueeMode = (e: { shiftKey: boolean; altKey: boolean }): MarqueeMode =>
   e.altKey ? 'subtract' : e.shiftKey ? 'add' : 'replace'
+
+/** «Собака», «Собака и косточка», «Девушка, собака и косточка» */
+const joinNames = (names: string[]) =>
+  names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} и ${names.at(-1)!.toLowerCase()}`
 
 export function ExtractView({ sourceId }: { sourceId: string }) {
   const meta = useUi((s) => s.sources.find((x) => x.id === sourceId))
@@ -65,6 +70,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [mode, setMode] = useState<ClickMode>('objects')
   /** Разметка объектов из objects.json; null — нет, работает эвристика */
   const [annotated, setAnnotated] = useState<SourceObject[] | null>(null)
+  /** Объекты, поправленные пользователем (хранятся в IndexedDB); важнее любой автоматической разметки */
+  const [edited, setEdited] = useState<SourceObject[] | null>(null)
 
   // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
   // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
@@ -97,7 +104,9 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         hostRef.current.replaceChildren(svg)
         const next = analyzeSource(svg, meta)
         setAnnotated(null)
+        setEdited(null)
         setModel(next)
+        void loadEditedObjects(meta, next.shapes.length).then((list) => !cancelled && setEdited(list))
         // Готовая разметка объектов: у встроенных исходников и у загруженных копий тех же иллюстраций (иначе — эвристика)
         void loadSourceObjects(meta, next).then((list) => !cancelled && setAnnotated(list))
       })
@@ -128,15 +137,15 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const previewUrl = useMemo(() => (preview ? svgDataUrl(standaloneSvg(preview)) : null), [preview])
   const bounds = useMemo(() => (model ? selectionBounds(model, selected) : null), [model, selected])
 
-  // Логические объекты (персонаж, животное, предмет) для выделения одним кликом:
-  // у встроенных исходников — готовая именованная разметка, у загруженных — эвристика
+  // Логические объекты (персонаж, животное, предмет) для выделения одним кликом: правки пользователя,
+  // иначе готовая именованная разметка (встроенные исходники и их копии), иначе эвристика
   const objects = useMemo(() => {
     if (!model) return null
-    const list: SourceObject[] = annotated ?? detectObjects(model).map((shapes) => ({ name: null, shapes }))
+    const list: SourceObject[] = edited ?? annotated ?? detectObjects(model).map((shapes) => ({ name: null, shapes }))
     const of = new Int32Array(model.shapes.length)
     list.forEach((o, k) => o.shapes.forEach((i) => (of[i] = k)))
     return { list, of }
-  }, [model, annotated])
+  }, [model, annotated, edited])
   const objectAt = (i: number): SourceObject => objects?.list[objects.of[i]!] ?? { name: null, shapes: [i] }
   const objectOf = (i: number): number[] => objectAt(i).shapes
 
@@ -149,8 +158,23 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     const exact = list.every((o) => o.name && o.shapes.every((i) => selected.has(i)))
     const total = list.reduce((n, o) => n + o.shapes.length, 0)
     if (!exact || total !== selected.size) return null
-    const names = list.map((o) => o.name!)
-    return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} и ${names.at(-1)!.toLowerCase()}`
+    return joinNames(list.map((o) => o.name!))
+  }, [objects, selected])
+
+  /**
+   * Что сделает «Сделать объектом» (Ctrl+G) с выделением: несколько объектов целиком — объединит,
+   * часть одного объекта — отделит. null — выделение уже ровно один объект
+   */
+  const regroup = useMemo(() => {
+    if (!objects || selected.size === 0) return null
+    const parts = [...new Set([...selected].map((i) => objects.of[i]!))].map((k) => objects.list[k]!)
+    const whole = parts.filter((o) => o.shapes.every((i) => selected.has(i)))
+    if (parts.length === 1 && whole.length === 1) return null
+    const label =
+      whole.length === parts.length ? 'Объединить в один объект' : parts.length === 1 ? 'Отделить в отдельный объект' : 'Сделать отдельным объектом'
+    // Имя переходит от объектов, вошедших целиком: «Мужчина» вместе с рукой остается «Мужчиной»
+    const named = whole.filter((o) => o.name).map((o) => o.name!)
+    return { label, name: named.length ? joinNames(named) : null }
   }, [objects, selected])
   const defaultName = suggestedName ?? `${meta?.title ?? ''} — фрагмент ${fromThisSource + 1}`
 
@@ -199,6 +223,65 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     setSelected(new Set())
     setName('')
     setMode('objects')
+  }
+
+  /** Запомнить исправленное разбиение на объекты: в этом браузере исходник дальше открывается с ним */
+  function commitObjects(next: SourceObject[], message: string) {
+    if (!meta || !model) return
+    const list = partition(next, model.shapes.length)
+    setEdited(list)
+    saveEditedObjects(meta, list).catch((e: unknown) => {
+      console.error(e)
+      notify('Не удалось сохранить правки объектов', 'error')
+    })
+    notify(message)
+  }
+
+  /** Выделение → один объект: объединяет целые объекты или отделяет часть объекта */
+  function makeObject() {
+    if (!objects || !regroup) {
+      notify('Выделите несколько объектов (Shift+клик) или часть объекта (двойной клик, затем Shift+клик)')
+      return
+    }
+    const rest = objects.list.map((o) => ({ ...o, shapes: o.shapes.filter((i) => !selected.has(i)) }))
+    const shapes = [...selected].sort((a, b) => a - b)
+    commitObjects([...rest, { name: regroup.name, shapes }], 'Объект запомнен: клик выделяет его целиком')
+    setMode('objects')
+  }
+
+  /** Название объекта с фигурой i: видно при наведении и подставляется в имя компонента */
+  async function nameObject(i: number) {
+    if (!objects) return
+    const k = objects.of[i]!
+    const current = objects.list[k]!
+    const value = await promptDialog({
+      title: 'Название объекта',
+      message: 'Название видно при наведении и подставляется в имя компонента.',
+      confirmText: 'Сохранить',
+      input: { label: 'Название объекта', value: current.name ?? '', placeholder: 'Например, Собака' },
+    })
+    if (value === null) return
+    const name = value.trim() || null
+    commitObjects(
+      objects.list.map((o, j) => (j === k ? { ...o, name } : o)),
+      name ? `Объект назван «${name}»` : 'Название объекта убрано',
+    )
+    setSelected(new Set(current.shapes))
+    setMode('objects')
+  }
+
+  async function resetObjects() {
+    if (!meta) return
+    const ok = await confirmDialog({
+      title: 'Сбросить правки объектов?',
+      message: 'Объединения, разделения и названия объектов этого исходника будут забыты, вернется автоматическая разметка.',
+      confirmText: 'Сбросить',
+      danger: true,
+    })
+    if (!ok) return
+    setEdited(null)
+    deleteObjectEdits(meta.id).catch((e: unknown) => console.error(e))
+    notify('Правки объектов сброшены')
   }
 
   /** Выделить объекты, в которые входят выбранные фигуры, и вернуться к режиму объектов */
@@ -366,8 +449,15 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       },
       { label: 'Снять выделение', icon: 'x', shortcut: 'Esc', disabled: !selected.size, onSelect: () => setSelected(new Set()) },
       'separator',
-      { label: 'Сохранить в библиотеку', icon: 'save', shortcut: 'Enter', disabled: !selected.size, onSelect: save },
+      // Исправление объектов: запоминается для этого исходника
+      { label: regroup?.label ?? 'Объединить в один объект', icon: 'group', shortcut: mod('G'), disabled: !regroup, onSelect: makeObject },
     )
+    if (hit !== undefined) {
+      const named = objectAt(hit).name
+      items.push({ label: named ? `Переименовать «${named}»…` : 'Назвать объект…', icon: 'tag', onSelect: () => void nameObject(hit) })
+    }
+    if (edited) items.push({ label: 'Сбросить мои правки объектов', icon: 'undo', onSelect: () => void resetObjects() })
+    items.push('separator', { label: 'Сохранить в библиотеку', icon: 'save', shortcut: 'Enter', disabled: !selected.size, onSelect: save })
     setHover(null)
     setMenuShape(hit ?? null)
     openContextMenu(e.clientX, e.clientY, items, { onClose: () => setMenuShape(null) })
@@ -380,8 +470,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   }
 
   // Клавиатура режима выделения
-  const actions = useRef({ expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection })
-  actions.current = { expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection }
+  const actions = useRef({ expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection, makeObject })
+  actions.current = { expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection, makeObject }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isDialogOpen()) return
@@ -396,6 +486,9 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
         e.preventDefault()
         a.selectAll()
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyG') {
+        e.preventDefault()
+        a.makeObject()
       } else if (e.key === 'Escape') {
         if (a.mode === 'elements') setMode('objects')
         else if (a.selected.size) setSelected(new Set())
@@ -467,6 +560,25 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         <IconButton icon="parent" label="Расширить до родительской группы" shortcut="↑" onClick={expand} disabled={!selected.size} />
         <IconButton icon="selectAll" label="Выделить все" shortcut="Ctrl+A" onClick={selectAll} disabled={!model} />
         <IconButton icon="x" label="Снять выделение" shortcut="Esc" onClick={() => setSelected(new Set())} disabled={!selected.size} />
+        <IconButton
+          icon="group"
+          label={regroup?.label ?? 'Сделать объектом: выделите несколько объектов или часть объекта'}
+          shortcut={mod('G')}
+          onClick={makeObject}
+          disabled={!regroup}
+          data-testid="make-object"
+        />
+        {edited && (
+          <button
+            type="button"
+            data-testid="reset-objects"
+            onClick={() => void resetObjects()}
+            title="Объекты этого исходника поправлены вами и запомнены. Нажмите, чтобы вернуть автоматическую разметку"
+            className="ml-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-accent-strong hover:bg-accent hover:text-white"
+          >
+            свои объекты ✕
+          </button>
+        )}
         <Divider />
         <IconButton icon="minus" label="Уменьшить" disabled={zoomIndex <= 0} onClick={() => setZoom(ZOOMS[zoomIndex - 1] ?? 1)} />
         <button

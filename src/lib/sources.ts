@@ -1,6 +1,6 @@
 import type { Rect, SourceMeta } from '../types'
 import { analyzeSource, type SourceModel } from './extract'
-import { loadUserSourceText } from './storage'
+import { loadObjectEdits, loadUserSourceText, saveObjectEdits } from './storage'
 
 /** Текст исходника: встроенный — из public/sources, загруженный — из IndexedDB */
 export async function loadSourceText(meta: SourceMeta): Promise<string> {
@@ -87,18 +87,38 @@ async function sameDrawing(model: SourceModel, id: string): Promise<boolean> {
   }
 }
 
-/** Разметка → объекты; фигуры, не попавшие в разметку, — отдельными безымянными объектами */
-function objectsFrom(entry: Annotation, shapeCount: number): SourceObject[] {
+/** Разметка → объекты */
+const objectsFrom = (entry: Annotation, shapeCount: number) =>
+  partition(
+    entry.objects.map((o) => ({ name: o.name, shapes: parseShapeRanges(o.shapes) })),
+    shapeCount,
+  )
+
+/**
+ * Разбиение на объекты, где каждая фигура ровно в одном объекте: номера вне файла и повторы отбрасываются,
+ * фигуры, не попавшие ни в один объект, становятся отдельными безымянными объектами
+ */
+export function partition(objects: readonly SourceObject[], shapeCount: number): SourceObject[] {
   const seen = new Set<number>()
   const list: SourceObject[] = []
-  for (const o of entry.objects) {
-    const shapes = parseShapeRanges(o.shapes).filter((i) => i >= 0 && i < shapeCount && !seen.has(i))
+  for (const o of objects) {
+    const shapes = o.shapes.filter((i) => Number.isInteger(i) && i >= 0 && i < shapeCount && !seen.has(i))
     shapes.forEach((i) => seen.add(i))
-    if (shapes.length) list.push({ name: o.name, shapes })
+    if (shapes.length) list.push({ name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : null, shapes })
   }
   for (let i = 0; i < shapeCount; i++) if (!seen.has(i)) list.push({ name: null, shapes: [i] })
   return list
 }
+
+/** Объекты, поправленные пользователем в этом браузере; null — правок нет или файл изменился */
+export async function loadEditedObjects(meta: SourceMeta, shapeCount: number): Promise<SourceObject[] | null> {
+  const edits = await loadObjectEdits(meta.id).catch(() => undefined)
+  if (!edits || edits.shapeCount !== shapeCount || !Array.isArray(edits.objects)) return null
+  return partition(edits.objects, shapeCount)
+}
+
+export const saveEditedObjects = (meta: SourceMeta, objects: SourceObject[]) =>
+  saveObjectEdits(meta.id, { shapeCount: objects.reduce((n, o) => n + o.shapes.length, 0), objects })
 
 const objectUrls = new Map<string, Promise<string>>()
 

@@ -1,11 +1,14 @@
 import { createStore, del, get, set } from 'idb-keyval'
 import type { Component, Library, Scene, SceneObject, SourceMeta } from '../types'
+import type { SourceObject } from './sources'
 
 const store = createStore('svg-constructor', 'kv')
 
 const KEYS = { components: 'components', scene: 'scene', userSources: 'userSources', libraries: 'libraries' } as const
 /** Текст загруженного SVG хранится отдельно от списка: список маленький, файлы могут быть большими */
 const sourceTextKey = (id: string) => `source:${id}`
+/** Объекты исходника, поправленные пользователем («Объединить», «Отделить», «Назвать») */
+const objectEditsKey = (id: string) => `objects:${id}`
 
 export async function loadComponents(): Promise<Component[]> {
   const list = await get<Component[]>(KEYS.components, store)
@@ -52,3 +55,9 @@ export const saveUserSources = (list: SourceMeta[]) => set(KEYS.userSources, lis
 export const loadUserSourceText = (id: string) => get<string>(sourceTextKey(id), store)
 export const saveUserSourceText = (id: string, text: string) => set(sourceTextKey(id), text, store)
 export const deleteUserSourceText = (id: string) => del(sourceTextKey(id), store)
+
+/** Разбиение исходника на объекты, исправленное пользователем; shapeCount защищает от смены файла */
+export type ObjectEdits = { shapeCount: number; objects: SourceObject[] }
+export const loadObjectEdits = (id: string) => get<ObjectEdits>(objectEditsKey(id), store)
+export const saveObjectEdits = (id: string, edits: ObjectEdits) => set(objectEditsKey(id), edits, store)
+export const deleteObjectEdits = (id: string) => del(objectEditsKey(id), store)

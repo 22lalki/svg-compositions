@@ -858,6 +858,50 @@ check('undo после удаления компонента не возвращ
   check('свои SVG: копия встроенной иллюстрации получает ее разметку', knownTruck === '48 Фургон / 9 Продавщица / 11 Мужчина со стаканом', knownTruck)
   check('свои SVG: эвристика на измененном фудтраке — фургон, продавщица, мужчина', guessedTruck === '48 / 9 / 11', guessedTruck)
 
+  // Исправление объектов запоминается: объединить, переименовать, отделить фигуру, сбросить
+  // Подпись видна над невыделенным объектом — сначала снимаем выделение
+  const hoverLabelAt = async (p) => {
+    await page.keyboard.press('Escape')
+    await page.mouse.move(p.x + 2, p.y + 2, { steps: 3 })
+    return (await page.locator('[data-testid="hover-label"]').count()) ? page.textContent('[data-testid="hover-label"]') : ''
+  }
+  await openSource('02')
+  await page.mouse.click(torso.x, torso.y)
+  await page.keyboard.down('Shift')
+  await page.mouse.click(dog.x, dog.y)
+  await page.keyboard.up('Shift')
+  await page.keyboard.press('Control+g')
+  await page.mouse.click(dog.x, dog.y)
+  const mergedNow = `${await count()} ${await hoverLabelAt(dog)}`
+  await page.reload()
+  await page.waitForSelector('[data-testid="canvas"] svg')
+  await openSource('02')
+  await page.mouse.click(dog.x, dog.y)
+  const mergedReload = await count()
+  await page.mouse.click(torso.x, torso.y, { button: 'right' })
+  await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Переименовать «Девушка и собака»…' }).click()
+  await page.getByLabel('Название объекта').fill('Хозяйка с собакой')
+  await page.keyboard.press('Enter')
+  const renamedLabel = await hoverLabelAt(dog)
+  await page.mouse.click(dog.x, dog.y)
+  const renamedDefault = await nameInput.getAttribute('placeholder')
+  await page.mouse.dblclick(dog.x, dog.y)
+  await page.keyboard.press('Control+g')
+  await page.mouse.click(dog.x, dog.y)
+  const splitPart = await count()
+  await page.mouse.click(torso.x, torso.y)
+  const splitRest = await count()
+  await page.click('[data-testid="reset-objects"]')
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Сбросить' }).click()
+  await page.mouse.click(torso.x, torso.y)
+  const afterReset = `${await count()} ${(await page.locator('[data-testid="reset-objects"]').count()) === 0}`
+  check('объекты: Ctrl+G объединяет девушку и собаку, имя складывается из их имен', mergedNow === '18 Девушка и собака', mergedNow)
+  check('объекты: объединение помнится после перезагрузки', mergedReload === '18', mergedReload)
+  check('объекты: переименование видно при наведении и в имени компонента', renamedLabel === 'Хозяйка с собакой' && renamedDefault === 'Хозяйка с собакой', `${renamedLabel} / ${renamedDefault}`)
+  check('объекты: отделенная фигура — отдельный объект, остальное — без нее', splitPart === '1' && splitRest === '17', `${splitPart} / ${splitRest}`)
+  check('объекты: сброс возвращает исходную разметку', afterReset === '14 true', afterReset)
+  await page.keyboard.press('Escape')
+
   // Библиотеки
   const where = (name) => page.locator(`[data-component-id][data-name="${name}"]`).first().evaluate((el) => el.closest('section').dataset.libraryName)
   await page.click('[data-testid="new-library"]')
@@ -894,7 +938,7 @@ check('undo после удаления компонента не возвращ
 for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
 writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
-check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 4, `навигаций: ${navigations}`)
+check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 5, `навигаций: ${navigations}`)
 
 await browser.close()
 const failed = checks.filter((c) => !c.ok)

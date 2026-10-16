@@ -55,10 +55,12 @@ export const Divider = () => <div className="mx-1 h-5 w-px bg-line" />
 export function ConfirmHost() {
   const request = useConfirm((s) => s.request)
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!request) return
-    confirmRef.current?.focus()
+    if (inputRef.current) inputRef.current.select()
+    else confirmRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') resolveConfirm(false)
     }
@@ -67,7 +69,7 @@ export function ConfirmHost() {
   }, [request])
 
   if (!request) return null
-  const close = resolveConfirm
+  const close = (ok: boolean) => resolveConfirm(ok, inputRef.current?.value)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onPointerDown={() => close(false)}>
       <div
@@ -78,6 +80,17 @@ export function ConfirmHost() {
       >
         <h2 className="text-base font-semibold">{request.title}</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted">{request.message}</p>
+        {request.input && (
+          <input
+            ref={inputRef}
+            defaultValue={request.input.value}
+            placeholder={request.input.placeholder}
+            aria-label={request.input.label}
+            maxLength={80}
+            onKeyDown={(e) => e.key === 'Enter' && close(true)}
+            className="mt-3 h-9 w-full rounded-md border border-line px-2.5 text-sm outline-none focus:border-accent"
+          />
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <Button onClick={() => close(false)}>Отмена</Button>
           <Button ref={confirmRef} variant={request.danger ? 'danger' : 'primary'} onClick={() => close(true)}>
