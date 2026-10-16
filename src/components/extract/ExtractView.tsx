@@ -257,7 +257,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     notify(`«${component.name}» сохранен в «${libraryName(libraries, saveTarget)}»`)
     setSelected(new Set())
     setName('')
-    setMode('objects')
   }
 
   /** Запомнить исправленное разбиение на объекты: в этом браузере исходник дальше открывается с ним */
@@ -281,7 +280,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     const rest = objects.list.map((o) => ({ ...o, shapes: o.shapes.filter((i) => !selected.has(i)) }))
     const shapes = [...selected].sort((a, b) => a - b)
     commitObjects([...rest, { name: regroup.name, shapes }], 'Объект запомнен: клик выделяет его целиком')
-    setMode('objects')
   }
 
   /** Название объекта с фигурой i: видно при наведении и подставляется в имя компонента */
@@ -302,7 +300,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       name ? `Объект назван «${name}»` : 'Название объекта убрано',
     )
     setSelected(new Set(current.shapes))
-    setMode('objects')
   }
 
   async function resetObjects() {
@@ -372,11 +369,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           return mode === 'add' ? new Set([...prev, ...inside]) : new Set(inside)
         })
       } else if (hit === undefined) {
-        // Клик по пустому месту: снять выделение и вернуться к объектам
-        if (!m.shiftKey) {
-          setSelected(new Set())
-          setMode('objects')
-        }
+        // Клик по пустому месту (или промах): снять выделение. Режим не меняется — его переключает только пользователь
+        if (!m.shiftKey) setSelected(new Set())
       } else {
         // Режим объектов — персонаж/предмет целиком, режим элементов — одна фигура
         const target = mode === 'objects' ? objectOf(hit) : [hit]
@@ -424,10 +418,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         label: objectAt(hit).name ? `Выделить «${objectAt(hit).name}»` : `Выделить объект (${obj.length})`,
         icon: 'marquee',
         disabled: objSelected && selected.size === obj.length,
-        onSelect: () => {
-          setSelected(new Set(obj))
-          setMode('objects')
-        },
+        onSelect: () => setSelected(new Set(obj)),
       })
       if (selected.size && !objSelected) {
         items.push({
@@ -458,19 +449,13 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         items.push({
           label: 'Исключить фигуру из выделения',
           icon: 'minus',
-          onSelect: () => {
-            setSelected((prev) => new Set([...prev].filter((i) => i !== hit)))
-            setMode('elements')
-          },
+          onSelect: () => setSelected((prev) => new Set([...prev].filter((i) => i !== hit))),
         })
       } else if (selected.size) {
         items.push({
           label: 'Добавить фигуру к выделению',
           icon: 'plus',
-          onSelect: () => {
-            setSelected((prev) => new Set([...prev, hit]))
-            setMode('elements')
-          },
+          onSelect: () => setSelected((prev) => new Set([...prev, hit])),
         })
       }
       items.push('separator')
