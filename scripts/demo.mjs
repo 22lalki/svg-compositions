@@ -517,6 +517,42 @@ const counts = {}
 for (const key of Object.keys(C)) counts[key] = await extract(key)
 console.log('Выделено фигур:', counts)
 check('библиотека: все компоненты сохранены', (await page.locator('[data-component-id]').count()) === Object.keys(C).length)
+
+// Контекстное меню исходника
+{
+  const srcMenu = page.locator('[data-testid="context-menu"]')
+  const item = (name) => srcMenu.getByRole('menuitem', { name })
+  const count = async () => (await page.textContent('[data-testid="selection-count"]')).match(/\d+/)[0]
+  const rightClickSrc = async (x, y) => {
+    const p = await srcToClient(x, y)
+    await page.mouse.click(p.x, p.y, { button: 'right' })
+    await srcMenu.waitFor()
+  }
+  await openSource('02')
+  await rightClickSrc(346, 255) // косточка в группе с matrix
+  const groupItem = await item(/Выделить ее группу/).textContent()
+  await item(/Выделить ее группу/).click()
+  check('меню исходника: «Выделить ее группу»', (await count()) === '3', `${groupItem.trim()} → ${await count()}`)
+  await rightClickSrc(346, 255)
+  await item('Исключить из выделения').click()
+  const afterExclude = await count()
+  await rightClickSrc(346, 255)
+  await item('Добавить к выделению').click()
+  check('меню исходника: исключить и добавить фигуру', afterExclude === '2' && (await count()) === '3', `${afterExclude} → ${await count()}`)
+  await rightClickSrc(-4, -4) // поле вокруг иллюстрации
+  await item('Инвертировать выделение').click()
+  check('меню исходника: инвертировать выделение', (await count()) === '27')
+  await rightClickSrc(-4, -4)
+  await item('Снять выделение').click()
+  await rightClickSrc(-4, -4)
+  const disabledWhenEmpty =
+    (await item('Снять выделение').isDisabled()) &&
+    (await item('Расширить до группы').isDisabled()) &&
+    (await item('Сохранить в библиотеку').isDisabled())
+  await item('Выделить все').click()
+  check('меню исходника: снять выделение / выделить все, пустое выделение блокирует пункты', disabledWhenEmpty && (await count()) === '30')
+  await page.keyboard.press('Escape')
+}
 await backToCanvas()
 
 // 2. Три композиции → examples/

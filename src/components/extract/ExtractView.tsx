@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import type { Component, Point, Rect } from '../../types'
 import {
   analyzeSource,
@@ -14,6 +21,7 @@ import { useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
 import { Button, Divider, IconButton, isDialogOpen, isTypingTarget } from '../ui'
+import { mod, openContextMenu, type MenuItem } from '../ContextMenu'
 
 type MarqueeMode = 'replace' | 'add' | 'subtract'
 const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8]
@@ -49,6 +57,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set())
   const [hover, setHover] = useState<number | null>(null)
+  /** Фигура, по которой открыто контекстное меню (подсвечена, пока меню открыто) */
+  const [menuShape, setMenuShape] = useState<number | null>(null)
   const [marquee, setMarquee] = useState<{ rect: Rect; mode: MarqueeMode } | null>(null)
   const [zoom, setZoom] = useState(1)
   const [stage, setStage] = useState({ w: 0, h: 0 })
@@ -213,6 +223,77 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     window.addEventListener('pointercancel', onCancel)
   }
 
+  /** ПКМ: действия с фигурой под курсором и с выделением целиком */
+  function onContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
+    e.preventDefault()
+    if (!model) return
+    const hit = shapeAt(e.target)
+    const items: MenuItem[] = []
+    if (hit !== undefined) {
+      const isSelected = selected.has(hit)
+      const group = expandToParentGroup(model, new Set([hit]))
+      if (isSelected) {
+        items.push({
+          label: 'Исключить из выделения',
+          icon: 'minus',
+          shortcut: 'Shift+клик',
+          onSelect: () =>
+            setSelected((prev) => {
+              const next = new Set(prev)
+              next.delete(hit)
+              return next
+            }),
+        })
+      } else if (selected.size) {
+        items.push({
+          label: 'Добавить к выделению',
+          icon: 'plus',
+          shortcut: 'Shift+клик',
+          onSelect: () => setSelected((prev) => new Set([...prev, hit])),
+        })
+      }
+      items.push(
+        {
+          label: selected.size ? 'Выделить только эту фигуру' : 'Выделить фигуру',
+          icon: 'pointer',
+          disabled: isSelected && selected.size === 1,
+          onSelect: () => setSelected(new Set([hit])),
+        },
+        {
+          label: group ? `Выделить ее группу (${group.size})` : 'Выделить ее группу',
+          icon: 'parent',
+          disabled: !group,
+          onSelect: () => group && setSelected(group),
+        },
+        'separator',
+      )
+    }
+    const all = model.shapes.length
+    const expanded = selected.size ? expandToParentGroup(model, selected) : null
+    items.push(
+      { label: 'Выделить все', icon: 'selectAll', shortcut: mod('A'), disabled: selected.size === all, onSelect: selectAll },
+      {
+        label: 'Инвертировать выделение',
+        icon: 'invert',
+        disabled: !selected.size || selected.size === all,
+        onSelect: () => setSelected((prev) => new Set(model.shapes.map((x) => x.index).filter((i) => !prev.has(i)))),
+      },
+      {
+        label: 'Расширить до группы',
+        icon: 'parent',
+        shortcut: '↑',
+        disabled: !expanded,
+        onSelect: () => expanded && setSelected(expanded),
+      },
+      { label: 'Снять выделение', icon: 'x', shortcut: 'Esc', disabled: !selected.size, onSelect: () => setSelected(new Set()) },
+      'separator',
+      { label: 'Сохранить в библиотеку', icon: 'save', shortcut: 'Enter', disabled: !selected.size, onSelect: save },
+    )
+    setHover(null)
+    setMenuShape(hit ?? null)
+    openContextMenu(e.clientX, e.clientY, items, { onClose: () => setMenuShape(null) })
+  }
+
   function onHover(e: ReactPointerEvent<HTMLDivElement>) {
     if (e.buttons !== 0) return
     const i = shapeAt(e.target) ?? null
@@ -247,7 +328,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
 
   if (!meta) return null
   const zoomIndex = ZOOMS.indexOf(zoom)
-  const hoverShape = hover !== null && !selected.has(hover) ? model?.shapes[hover] : undefined
+  const highlight = menuShape ?? hover
+  const hoverShape = highlight !== null && (menuShape !== null || !selected.has(highlight)) ? model?.shapes[highlight] : undefined
   const marqueeColor = marquee?.mode === 'subtract' ? '#e11d48' : marquee?.mode === 'add' ? '#059669' : '#6c63ff'
 
   return (
@@ -286,7 +368,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       <div className="flex min-h-0 flex-1">
         <div ref={stageRef} className="scroll-thin relative min-w-0 flex-1 overflow-auto bg-workspace">
           {/* Рамку можно начинать и с полей вокруг иллюстрации */}
-          <div className="flex min-h-full w-max min-w-full cursor-crosshair p-6 select-none" onPointerDown={onPointerDown}>
+          <div
+            className="flex min-h-full w-max min-w-full cursor-crosshair p-6 select-none"
+            onPointerDown={onPointerDown}
+            onContextMenu={onContextMenu}
+          >
             <div
               className="relative m-auto rounded-sm bg-white shadow-[0_1px_4px_rgb(0_0_0/0.12)]"
               style={{ width: display.w, height: display.h }}
