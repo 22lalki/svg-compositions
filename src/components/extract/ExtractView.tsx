@@ -72,6 +72,10 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [annotated, setAnnotated] = useState<SourceObject[] | null>(null)
   /** Объекты, поправленные пользователем (хранятся в IndexedDB); важнее любой автоматической разметки */
   const [edited, setEdited] = useState<SourceObject[] | null>(null)
+  /** Правки и готовая разметка прочитаны: до этого эвристику не запускаем — ее результат может не понадобиться */
+  const [objectsLoaded, setObjectsLoaded] = useState(false)
+  /** Объекты эвристики для файлов без разметки; считаются после отрисовки, чтобы исходник появился сразу */
+  const [detected, setDetected] = useState<SourceObject[] | null>(null)
 
   // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
   // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
@@ -105,10 +109,22 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         const next = analyzeSource(svg, meta)
         setAnnotated(null)
         setEdited(null)
+        setDetected(null)
+        setObjectsLoaded(false)
         setModel(next)
-        void loadEditedObjects(meta, next.shapes.length).then((list) => !cancelled && setEdited(list))
-        // Готовая разметка объектов: у встроенных исходников и у загруженных копий тех же иллюстраций (иначе — эвристика)
-        void loadSourceObjects(meta, next).then((list) => !cancelled && setAnnotated(list))
+        // Правки пользователя и готовая разметка (встроенные исходники и загруженные копии тех же иллюстраций)
+        const quiet = (e: unknown) => {
+          console.error(e)
+          return null
+        }
+        void Promise.all([loadEditedObjects(meta, next.shapes.length).catch(quiet), loadSourceObjects(meta, next).catch(quiet)]).then(
+          ([own, ready]) => {
+            if (cancelled) return
+            setEdited(own)
+            setAnnotated(ready)
+            setObjectsLoaded(true)
+          },
+        )
       })
       .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
     return () => {
@@ -139,13 +155,23 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
 
   // Логические объекты (персонаж, животное, предмет) для выделения одним кликом: правки пользователя,
   // иначе готовая именованная разметка (встроенные исходники и их копии), иначе эвристика
+  const needsHeuristic = !!model && objectsLoaded && !edited && !annotated
+  useEffect(() => {
+    if (!model || !needsHeuristic || detected) return
+    // После отрисовки: исходник виден сразу, объекты появляются следом
+    const timer = setTimeout(() => setDetected(partition(detectObjects(model).map((shapes) => ({ name: null, shapes })), model.shapes.length)))
+    return () => clearTimeout(timer)
+  }, [model, needsHeuristic, detected])
+  const detecting = needsHeuristic && !detected
+
   const objects = useMemo(() => {
     if (!model) return null
-    const list: SourceObject[] = edited ?? annotated ?? detectObjects(model).map((shapes) => ({ name: null, shapes }))
+    const list = edited ?? annotated ?? detected
+    if (!list) return null
     const of = new Int32Array(model.shapes.length)
     list.forEach((o, k) => o.shapes.forEach((i) => (of[i] = k)))
     return { list, of }
-  }, [model, annotated, edited])
+  }, [model, annotated, edited, detected])
   const objectAt = (i: number): SourceObject => objects?.list[objects.of[i]!] ?? { name: null, shapes: [i] }
   const objectOf = (i: number): number[] => objectAt(i).shapes
 
@@ -286,7 +312,12 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
 
   /** Выделить объекты, в которые входят выбранные фигуры, и вернуться к режиму объектов */
   function selectObjectsOfSelection() {
-    setSelected((prev) => new Set([...prev].flatMap((i) => objectOf(i))))
+    setSelected((prev) => {
+      if (!objects) return prev
+      // Каждый объект — один раз, сколько бы его фигур ни было выделено
+      const ks = new Set(Array.from(prev, (i) => objects.of[i]!))
+      return new Set([...ks].flatMap((k) => objects.list[k]!.shapes))
+    })
     setMode('objects')
   }
 
@@ -553,6 +584,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
             </button>
           ))}
         </div>
+        {detecting && (
+          <span className="px-2 text-xs text-muted" data-testid="objects-detecting">
+            определяю объекты…
+          </span>
+        )}
         <span className="px-2 text-xs text-muted" data-testid="selection-count">
           Выделено: {selected.size}
           {model ? ` из ${model.shapes.length}` : ''}

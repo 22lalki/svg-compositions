@@ -184,11 +184,28 @@ function touches(a: Mask, b: Mask): boolean {
   return false
 }
 
+/** Доля пикселей формы x, закрытых одной маской: только пересечение рамок, без вызовов на пиксель */
+function coverageOne(x: Mask, m: Mask): number {
+  if (!x.count || !m.count) return 0
+  const x0 = Math.max(x.x0, m.x0)
+  const y0 = Math.max(x.y0, m.y0)
+  const x1 = Math.min(x.x0 + x.w, m.x0 + m.w)
+  const y1 = Math.min(x.y0 + x.h, m.y0 + m.h)
+  let covered = 0
+  for (let y = y0; y < y1; y++) {
+    const rx = (y - x.y0) * x.w - x.x0
+    const rm = (y - m.y0) * m.w - m.x0
+    for (let px = x0; px < x1; px++) if (x.data[rx + px] && m.data[rm + px]) covered++
+  }
+  return covered / x.count
+}
+
 /** Доля пикселей формы x, закрытых фигурами набора */
 function coverage(x: Mask, all: Mask[]): number {
   if (!x.count) return 0
   const shapes = all.filter((m) => m.count && m.x0 < x.x0 + x.w && x.x0 < m.x0 + m.w && m.y0 < x.y0 + x.h && x.y0 < m.y0 + m.h)
   if (!shapes.length) return 0
+  if (shapes.length === 1) return coverageOne(x, shapes[0]!)
   let covered = 0
   for (let yy = 0; yy < x.h; yy++) {
     for (let xx = 0; xx < x.w; xx++) {
@@ -495,14 +512,22 @@ export function detectObjects(model: SourceModel): number[][] {
    * свои фигуры — без далеких по порядку деталей «поверх» (снег на елке не растягивает елку до человека),
    * их диапазон в порядке документа, площадь и рамка в пикселях растра
    */
-  type Info = { n: number; own: number[]; span: readonly [number, number]; area: number; box: readonly [number, number, number, number] }
+  type Info = {
+    n: number
+    own: number[]
+    span: readonly [number, number]
+    area: number
+    box: readonly [number, number, number, number]
+    /** Фигуры-контуры (рамка карточки, обводка диаграммы) — кандидаты для «детали внутри контура» */
+    hollows: number[]
+  }
   const infos = new WeakMap<Cluster, Info>()
   const info = (c: Cluster): Info => {
     const hit = infos.get(c)
     if (hit && hit.n === c.shapes.length) return hit
     const core = c.shapes.filter((i) => !c.overlays.has(i))
     const [lo, hi] = [Math.min(...core), Math.max(...core)]
-    const own = c.shapes.filter((i) => !c.overlays.has(i) || (i >= lo - 8 && i <= hi + 8))
+    const own = c.shapes.filter((i) => !c.overlays.has(i) || (i >= lo - 8 && i <= hi + 8)).sort((p, q) => p - q)
     let [x0, y0, x1, y1, sum] = [Infinity, Infinity, -Infinity, -Infinity, 0]
     for (const i of c.shapes) {
       const m = masks[i]!
@@ -510,11 +535,46 @@ export function detectObjects(model: SourceModel): number[][] {
       ;[x0, y0, x1, y1] = [Math.min(x0, m.x0), Math.min(y0, m.y0), Math.max(x1, m.x0 + m.w), Math.max(y1, m.y0 + m.h)]
       sum += m.count
     }
-    const out: Info = { n: c.shapes.length, own, span: [Math.min(...own), Math.max(...own)], area: sum, box: [x0, y0, x1, y1] }
+    const hollows = c.shapes.filter((i) => hollow(masks[i]!))
+    const out: Info = { n: c.shapes.length, own, span: [own[0]!, own[own.length - 1]!], area: sum, box: [x0, y0, x1, y1], hollows }
     infos.set(c, out)
     return out
   }
   const area = (c: Cluster) => info(c).area
+  /**
+   * Объединение масок всех фигур объекта: «доля фигуры, лежащая на объекте» считается по одному массиву,
+   * а не перебором его фигур. Фигуры в объект только добавляются — маска достраивается, пока рамка не выросла
+   */
+  const unions = new WeakMap<Cluster, { n: number; mask: Mask }>()
+  const unionOf = (c: Cluster): Mask => {
+    const [x0, y0, x1, y1] = info(c).box
+    let hit = unions.get(c)
+    const fits = hit && hit.mask.x0 <= x0 && hit.mask.y0 <= y0 && hit.mask.x0 + hit.mask.w >= x1 && hit.mask.y0 + hit.mask.h >= y1
+    if (!hit || !fits) {
+      const w = Number.isFinite(x0) ? x1 - x0 : 0
+      const h = Number.isFinite(y0) ? y1 - y0 : 0
+      hit = { n: 0, mask: { x0: Number.isFinite(x0) ? x0 : 0, y0: Number.isFinite(y0) ? y0 : 0, w, h, data: new Uint8Array(w * h), count: 0 } }
+      unions.set(c, hit)
+    }
+    const u = hit.mask
+    for (const i of c.shapes.slice(hit.n)) {
+      const m = masks[i]!
+      for (let yy = 0; yy < m.h; yy++) {
+        const src = yy * m.w
+        const dst = (m.y0 + yy - u.y0) * u.w + (m.x0 - u.x0)
+        for (let xx = 0; xx < m.w; xx++) {
+          if (m.data[src + xx] && !u.data[dst + xx]) {
+            u.data[dst + xx] = 1
+            u.count++
+          }
+        }
+      }
+    }
+    hit.n = c.shapes.length
+    return u
+  }
+  /** Доля фигуры, лежащая на объекте */
+  const coveredBy = (x: Mask, c: Cluster) => coverageOne(x, unionOf(c))
   /** Число видимых фигур: штрихи нулевой площади не делают обрывок «полноценным объектом» */
   const visible = (c: Cluster) => c.shapes.filter((i) => masks[i]!.count).length
   const own = (c: Cluster) => info(c).own
@@ -568,20 +628,35 @@ export function detectObjects(model: SourceModel): number[][] {
   /** Между a и b по порядку нет другого полноценного (2+ фигуры) объекта */
   const neighbors = (a: Cluster, b: Cluster) => {
     const [lo, hi] = span(a)[0] < span(b)[0] ? [span(a)[1], span(b)[0]] : [span(b)[1], span(a)[0]]
-    return !clusters.some((c) => c !== a && c !== b && !c.background && own(c).length >= 2 && span(c)[0] > lo && span(c)[1] < hi)
+    const between = (c: Cluster | undefined) =>
+      !!c && c !== a && c !== b && !c.background && alive(c) && own(c).length >= 2 && span(c)[0] > lo && span(c)[1] < hi
+    // Объект целиком внутри промежутка содержит фигуру из промежутка — достаточно пройти по нему
+    if (hi - lo < clusters.length) {
+      for (let k = lo + 1; k < hi; k++) if (between(owner.get(k))) return false
+      return true
+    }
+    return !clusters.some(between)
   }
 
+  /** Есть ли у b своя фигура строго между первой и последней фигурой a */
   const interleaved = (a: Cluster, b: Cluster) => {
     const [lo, hi] = span(a)
-    return own(b).some((j) => j > lo && j < hi)
+    const ob = own(b)
+    let l = 0
+    let r = ob.length
+    while (l < r) {
+      const mid = (l + r) >> 1
+      if (ob[mid]! <= lo) l = mid + 1
+      else r = mid
+    }
+    return l < ob.length && ob[l]! < hi
   }
   /**
    * Какая доля раньше нарисованного объекта закрыта позже нарисованным. Пальто закрывает заметную часть торса,
    * а человек перед фургоном — крошечную долю фургона
    */
   const overlapShare = (earlier: Cluster, later: Cluster) =>
-    earlier.shapes.reduce((n, i) => n + coverage(masks[i]!, later.shapes.map((j) => masks[j]!)) * masks[i]!.count, 0) /
-    Math.max(area(earlier), 1)
+    earlier.shapes.reduce((n, i) => n + coveredBy(masks[i]!, later) * masks[i]!.count, 0) / Math.max(area(earlier), 1)
 
   /**
    * Фигура внутри объекта, а не на нем: лежит на объекте, и его же части, нарисованные позже, закрывают ее спереди
@@ -607,10 +682,8 @@ export function detectObjects(model: SourceModel): number[][] {
     const y0 = Math.min(...boxes.map((b) => b.y))
     const x1 = Math.max(...boxes.map((b) => b.x + b.width))
     const y1 = Math.max(...boxes.map((b) => b.y + b.height))
-    return target.shapes.some((t) => {
-      const m = masks[t]!
+    return info(target).hollows.some((t) => {
       const b = model.shapes[t]!.bbox
-      if (!hollow(m)) return false
       if (x0 < b.x || y0 < b.y || x1 > b.x + b.width || y1 > b.y + b.height) return false
       return (x1 - x0) * (y1 - y0) >= 0.05 * b.width * b.height
     })
@@ -631,18 +704,53 @@ export function detectObjects(model: SourceModel): number[][] {
   const bgMasks = new Set(clusters.filter((c) => c.background).flatMap((c) => c.shapes))
   const dots = clusters.filter((c) => !c.group && !c.background && c.shapes.length === 1 && box(c).dot).map((c) => c.shapes[0]!)
   const dotSet = new Set(dots)
-  const free = dots.filter((i) => coverage(masks[i]!, masks.filter((_, j) => j !== i && !bgMasks.has(j))) < 0.2)
+  // Растр масок не шире MASK_SIZE + 2 пикселей (см. buildMasks)
+  const rasterW = MASK_SIZE + 2
+  const depth = new Uint16Array(rasterW * rasterW)
+  if (dots.length) {
+    masks.forEach((m, j) => {
+      if (bgMasks.has(j)) return
+      for (let yy = 0; yy < m.h; yy++)
+        for (let xx = 0; xx < m.w; xx++) if (m.data[yy * m.w + xx]) depth[(m.y0 + yy) * rasterW + m.x0 + xx]!++
+    })
+  }
+  /** Доля точки, закрытая другими фигурами: пиксели, где кроме нее есть еще кто-то */
+  const coveredByOthers = (m: Mask) => {
+    let n = 0
+    for (let yy = 0; yy < m.h; yy++)
+      for (let xx = 0; xx < m.w; xx++) if (m.data[yy * m.w + xx] && depth[(m.y0 + yy) * rasterW + m.x0 + xx]! > 1) n++
+    return m.count ? n / m.count : 0
+  }
+  const free = dots.filter((i) => coveredByOthers(masks[i]!) < 0.2)
   const dotArea = (i: number) => Math.max(model.shapes[i]!.bbox.width * model.shapes[i]!.bbox.height, 1e-9)
   const inField = (piece: Cluster) => {
     const i = piece.shapes[0]!
     if (piece.shapes.length !== 1 || !dotSet.has(i)) return false
     return free.filter((j) => j !== i && Math.max(dotArea(i), dotArea(j)) <= 2 * Math.min(dotArea(i), dotArea(j))).length >= 3
   }
+  const fieldSet = new Set(clusters.filter(inField).map((c) => c.shapes[0]!))
+  const isField = (c: Cluster) => c.shapes.length === 1 && fieldSet.has(c.shapes[0]!)
   // Расстояние по порядку документа без точек поля: звезды, нарисованные между планетой и ее орбитой, не разделяют их
-  const field = clusters.filter(inField).map((c) => c.shapes[0]!)
-  const before = model.shapes.map((_, k) => field.filter((i) => i < k).length)
-  const gap = (a: Cluster, b: Cluster) =>
-    Math.min(...own(a).flatMap((i) => own(b).map((j) => Math.abs(i - j) - Math.abs(before[Math.max(i, j)]! - before[Math.min(i, j) + 1]!))))
+  const before = new Int32Array(model.shapes.length + 1)
+  for (let k = 0; k < model.shapes.length; k++) before[k + 1] = before[k]! + (fieldSet.has(k) ? 1 : 0)
+  const dist = (i: number, j: number) => Math.abs(i - j) - Math.abs(before[Math.max(i, j)]! - before[Math.min(i, j) + 1]!)
+  /** Расстояние по порядку: с удалением от i оно не убывает, поэтому достаточно соседей i в отсортированном own(b) */
+  const gap = (a: Cluster, b: Cluster) => {
+    const ob = own(b)
+    let best = Infinity
+    for (const i of own(a)) {
+      let lo = 0
+      let hi = ob.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (ob[mid]! < i) lo = mid + 1
+        else hi = mid
+      }
+      if (lo < ob.length) best = Math.min(best, dist(i, ob[lo]!))
+      if (lo > 0) best = Math.min(best, dist(i, ob[lo - 1]!))
+    }
+    return best
+  }
 
   // 3–4 повторяем, пока что-то склеивается: после слияния торса и брюк к ним может прилипнуть ботинок
   /**
@@ -651,7 +759,7 @@ export function detectObjects(model: SourceModel): number[][] {
    * хотя лежит на борту фургона
    */
   const sandwich = (piece: Cluster) => {
-    const skip = (k: number) => piece.shapes.includes(k) || !masks[k]!.count || field.includes(k) || owner.get(k)?.background
+    const skip = (k: number) => piece.shapes.includes(k) || !masks[k]!.count || fieldSet.has(k) || owner.get(k)?.background
     let a = Math.min(...piece.shapes) - 1
     while (a >= 0 && skip(a)) a--
     let b = Math.max(...piece.shapes) + 1
@@ -669,7 +777,7 @@ export function detectObjects(model: SourceModel): number[][] {
     const pieces = clusters.filter((c) => !c.group && !c.background && visible(c) <= 3).sort((a, b) => area(a) - area(b))
     const around = gridOf(clusters.filter((c) => !c.background))
     for (const piece of pieces) {
-      if (!alive(piece) || visible(piece) > 3 || inField(piece)) continue
+      if (!alive(piece) || visible(piece) > 3 || isField(piece)) continue
       const mid = (span(piece)[0] + span(piece)[1]) / 2
       // Деталь «поверх» судим по ее главной фигуре: тень горы на соседней горе не тянет за собой саму гору
       const main = piece.shapes.reduce((m, i) => (masks[i]!.count > masks[m]!.count ? i : m))
@@ -680,7 +788,7 @@ export function detectObjects(model: SourceModel): number[][] {
         const g = gap(piece, target)
         // Деталь, хотя бы наполовину лежащая на объекте (волосы, нарисованные последними) или внутри его контура, —
         // к нему, на любом расстоянии
-        if (area(piece) <= area(target) && (coverage(masks[main]!, target.shapes.map((j) => masks[j]!)) >= 0.5 || insideOutline(piece, target))) {
+        if (area(piece) <= area(target) && (coveredBy(masks[main]!, target) >= 0.5 || insideOutline(piece, target))) {
           if (!lay || g < lay.gap) lay = { target, gap: g }
         } else others.push({ target, gap: g })
       }
@@ -709,28 +817,27 @@ export function detectObjects(model: SourceModel): number[][] {
     // 4: прогоны вперемешку
     const runs = clusters.filter((c) => !c.group && !c.background)
     const nearRuns = gridOf(runs)
-    outer: for (const a of runs) {
+    for (const a of runs) {
+      if (!alive(a)) continue
       for (const b of nearRuns(a)) {
-        if (a === b || !close(a, b) || !(interleaved(a, b) || interleaved(b, a)) || !touching(a, b)) continue
+        if (a === b || !alive(b) || !close(a, b) || !(interleaved(a, b) || interleaved(b, a)) || !touching(a, b)) continue
         if (inside(a, b) || inside(b, a)) continue // продавщица нарисована между частями фургона, но она внутри него
         merge(a, b, false)
         changed = true
-        break outer
       }
     }
     if (changed) continue
     // 4б: соседние по порядку части, сильно наложенные друг на друга (пальто поверх торса), — один объект;
     //     соседние деревья соприкасаются лишь краями и остаются раздельными
-    const ordered = runs.slice().sort((a, b) => span(a)[0] - span(b)[0])
-    for (let k = 0; k + 1 < ordered.length; k++) {
-      const a = ordered[k]!
-      const b = ordered[k + 1]!
-      if (!close(a, b) || !neighbors(a, b) || !a.shapes.some((i) => b.shapes.some((j) => linked(i, j)))) continue
-      if (overlapShare(a, b) >= 0.2) {
+    const ordered = runs.filter(alive).sort((a, b) => span(a)[0] - span(b)[0])
+    for (let k = 1, a = ordered[0]; a && k < ordered.length; k++) {
+      const b = ordered[k]!
+      const joined =
+        close(a, b) && overlapShare(a, b) >= 0.2 && neighbors(a, b) && a.shapes.some((i) => b.shapes.some((j) => linked(i, j)))
+      if (joined) {
         merge(a, b, false)
         changed = true
-        break
-      }
+      } else a = b
     }
     if (changed) continue
     // 4в: многодетальный узел целиком на другом объекте (крестовина на корпусе геймпада) — его часть,
@@ -739,13 +846,13 @@ export function detectObjects(model: SourceModel): number[][] {
     const nodes = clusters.filter((c) => !c.group && !c.background && visible(c) > 3).sort((a, b) => span(b)[0] - span(a)[0])
     const nearAll = gridOf(clusters.filter((c) => !c.background))
     for (const run of nodes) {
+      if (!alive(run)) continue
       const target = [...nearAll(run)].find(
-        (t) => t !== run && close(run, t, 0) && area(t) >= area(run) && overlapShare(run, t) >= 0.98 && !inside(run, t),
+        (t) => t !== run && alive(t) && close(run, t, 0) && area(t) >= area(run) && overlapShare(run, t) >= 0.98 && !inside(run, t),
       )
       if (!target) continue
       merge(target, run, true)
       changed = true
-      break
     }
   }
 
