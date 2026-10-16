@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SourceMeta } from '../types'
-import { deleteUserSourceText, saveUserSources } from '../lib/storage'
+import { deleteUserObjects, deleteUserSourceText, saveUserSources } from '../lib/storage'
 import { releaseSourceThumb } from '../lib/sources'
 
 export type Toast = { id: number; text: string; kind: 'info' | 'error' }
@@ -57,6 +57,7 @@ export const useUi = create<UiState>()((set, get) => ({
     }))
     persistUserSources(userSources)
     deleteUserSourceText(id).catch((e: unknown) => console.error(e))
+    deleteUserObjects(id).catch((e: unknown) => console.error(e))
     releaseSourceThumb(id)
   },
   openSource: (id) => set({ extractSourceId: id }),

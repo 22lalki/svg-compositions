@@ -125,7 +125,8 @@ if (VIDEO) await context.addInitScript(CURSOR_SCRIPT)
 const page = await context.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+// Ответы /api/annotate с ошибкой ожидаемы (нет ключа, подмененная ошибка) — браузер все равно пишет их в консоль
+page.on('console', (m) => m.type() === 'error' && !m.location().url.includes('/api/annotate') && errors.push(m.text()))
 let navigations = 0
 page.on('framenavigated', (fr) => fr === page.mainFrame() && navigations++)
 
@@ -784,6 +785,63 @@ check('undo после удаления компонента не возвращ
   check('свои SVG: компонент удаленного исходника подписан', (await myCard.textContent()).includes('удаленный исходник'))
 }
 
+// 11. ИИ-разметка своих SVG (Claude через /api/annotate; в тесте ответ функции подменен)
+{
+  const fixture = path.join(ROOT, 'src', 'dev', 'fixtures', 'use-symbol.svg')
+  const status = () => page.locator('[data-testid="ai-status"]')
+  // а) ключа нет — функция честно отвечает 503, работает эвристика
+  await page.setInputFiles('[data-testid="upload-input"]', [fixture])
+  await page.waitForSelector('[data-testid="ai-status"][data-state="unavailable"]')
+  check('ИИ без ключа: «Объекты: авто», работает автоматическое определение', (await status().textContent()).includes('авто'))
+
+  // б) ИИ отвечает: именованные объекты. Перезагрузка — приложение запоминает «ключа нет» до нее
+  await page.reload()
+  await page.waitForSelector('[data-testid="canvas"] svg')
+  let calls = 0
+  let sent = null
+  const answer = { objects: [{ name: 'Большая звезда', shapes: [0] }, { name: 'Малая звезда', shapes: [1] }, { name: 'Листья', shapes: [2, 3] }], model: 'claude-opus-5-5' }
+  let reply = { status: 200, body: answer }
+  await page.route('**/api/annotate', async (route) => {
+    calls++
+    sent = route.request().postDataJSON()
+    await route.fulfill({ status: reply.status, contentType: 'application/json', body: JSON.stringify(reply.body) })
+  })
+  await page.setInputFiles('[data-testid="upload-input"]', [fixture])
+  await page.waitForSelector('[data-testid="ai-status"][data-state="done"]')
+  const pngHead = Buffer.from(sent.image.slice(0, 12), 'base64').subarray(0, 4).toString('latin1')
+  check(
+    'ИИ: в запросе PNG с номерами фигур, таблица и подсказка эвристики',
+    pngHead === '\x89PNG' && sent.shapeCount === 4 && sent.table.split('\n').length === 4 && Array.isArray(sent.hint),
+    `PNG ${Math.round(sent.image.length / 1024)} КБ`,
+  )
+  check('ИИ: статус «ИИ: 3 объектов»', (await status().textContent()).includes('3 объектов'))
+  const leaf = await srcToClient(80, 230)
+  await page.mouse.move(leaf.x, leaf.y, { steps: 3 })
+  await page.waitForSelector('[data-testid="hover-label"]')
+  const aiHover = await page.textContent('[data-testid="hover-label"]')
+  await page.mouse.click(leaf.x, leaf.y)
+  const aiCount = (await page.textContent('[data-testid="selection-count"]')).match(/\d+/)[0]
+  const aiName = await page.getByLabel('Название компонента').getAttribute('placeholder')
+  check('ИИ: клик выделяет объект ИИ, подпись и имя из разметки', aiHover === 'Листья' && aiCount === '2' && aiName === 'Листья', `${aiHover} / ${aiCount} / ${aiName}`)
+  const aiSourceId = await page.getAttribute('[data-source-svg]', 'data-source-svg')
+  await openSource('02')
+  await page.click(`[data-source-id="${aiSourceId}"]`)
+  await page.waitForSelector('[data-testid="ai-status"][data-state="done"]')
+  check('ИИ: повторное открытие берет разметку из кеша, без нового запроса', calls === 1, `запросов: ${calls}`)
+
+  // в) ошибка сервера и повтор по клику
+  reply = { status: 502, body: { error: 'upstream', message: 'Claude API: 529 overloaded' } }
+  await status().click()
+  await page.waitForSelector('[data-testid="ai-status"][data-state="error"]')
+  reply = { status: 200, body: answer }
+  await status().click()
+  await page.waitForSelector('[data-testid="ai-status"][data-state="done"]')
+  check('ИИ: ошибка показывается, повтор по клику работает', calls === 3, `запросов: ${calls}`)
+  await page.unroute('**/api/annotate')
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+}
+
 // 10. Клик — объект целиком, двойной клик — элементы; библиотеки
 {
   const count = async () => (await page.textContent('[data-testid="selection-count"]')).match(/\d+/)[0]
@@ -869,7 +927,7 @@ check('undo после удаления компонента не возвращ
 for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
 writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
-check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 4, `навигаций: ${navigations}`)
+check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 5, `навигаций: ${navigations}`)
 
 await browser.close()
 const failed = checks.filter((c) => !c.ok)
