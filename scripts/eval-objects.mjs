@@ -1,5 +1,6 @@
 // Оценка эвристики логических объектов (src/lib/objects.ts) по эталонной разметке public/sources/objects.json.
-// Запуск при работающем dev-сервере: node scripts/eval-objects.mjs [--detail 07 11]
+// Запуск при работающем dev-сервере: node scripts/eval-objects.mjs [--upload] [--detail 07 11]
+//   --upload — файлы проходят тот же путь, что и загрузка пользователем (очистка и нормализация importSvg.ts)
 //   клик  — доля площади рисунка, где клик выделяет ровно эталонный объект;
 //   IoU   — среднее по эталонным объектам совпадение с лучшим объектом эвристики (по площади фигур).
 import { chromium } from 'playwright'
@@ -7,24 +8,28 @@ import { chromium } from 'playwright'
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173'
 const args = process.argv.slice(2)
 const detail = args.includes('--detail') ? args.slice(args.indexOf('--detail') + 1) : []
+const upload = args.includes('--upload')
 
 const browser = await chromium.launch()
 const page = await browser.newPage()
 await page.goto(`${BASE}/verify.html?idle`)
 await page.waitForFunction(() => document.title === 'verify: done')
-const results = await page.evaluate(async (detail) => {
+const results = await page.evaluate(async ([detail, upload]) => {
   const { analyzeSource } = await import('/src/lib/extract.ts')
   const { detectObjects, shapeAreas } = await import('/src/lib/objects.ts')
   const { parseShapeRanges } = await import('/src/lib/sources.ts')
+  const { prepareSvgText } = await import('/src/lib/importSvg.ts')
   const truthAll = await fetch('/sources/objects.json').then((r) => r.json())
   const out = []
   for (const id of Object.keys(truthAll).sort()) {
-    const text = await fetch(`/sources/${id}.svg`).then((r) => r.text())
+    const raw = await fetch(`/sources/${id}.svg`).then((r) => r.text())
+    const text = upload ? prepareSvgText(raw).svgText : raw
     const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
     const svg = document.importNode(doc.documentElement, true)
     svg.style.cssText = 'width:400px;height:400px'
     document.getElementById('host').replaceChildren(svg)
-    const model = analyzeSource(svg, { id, title: '', originalName: '', kind: 'builtin' })
+    const model = analyzeSource(svg, { id, title: '', originalName: '', kind: upload ? 'user' : 'builtin' })
+    if (model.shapes.length !== truthAll[id].shapeCount) throw new Error(`${id}: ${model.shapes.length} фигур вместо ${truthAll[id].shapeCount}`)
     const area = shapeAreas(model).map((a) => Math.max(a, 1))
     const truth = truthAll[id].objects.map((o) => ({ name: o.name, shapes: parseShapeRanges(o.shapes) }))
     const pred = detectObjects(model)
@@ -65,7 +70,7 @@ const results = await page.evaluate(async (detail) => {
     out.push(row)
   }
   return out
-}, detail)
+}, [detail, upload])
 await browser.close()
 
 console.log('src  объекты кластеры   клик    IoU')

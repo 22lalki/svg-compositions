@@ -833,6 +833,31 @@ check('undo после удаления компонента не возвращ
   await page.mouse.click(person.x, person.y)
   check('объект без групп в исходнике (19): человек целиком', (await count()) === '17', await count())
 
+  // Загруженные файлы: перекрашенная копия встроенной иллюстрации получает ее разметку, измененная — эвристику
+  const truckText = readFileSync(path.join(ROOT, 'public', 'sources', '11.svg'), 'utf8')
+  const truckRecolored = path.join(OUT, 'фудтрак-зеленый.svg')
+  const truckEdited = path.join(OUT, 'фудтрак-измененный.svg')
+  writeFileSync(truckRecolored, truckText.replaceAll('#6c63ff', '#00b894'))
+  writeFileSync(truckEdited, truckText.replaceAll('#6c63ff', '#00b894').replace('<path d="M', '<path d="M5,5h1v1z"/><path d="M'))
+  await page.setInputFiles('[data-testid="upload-input"]', [truckRecolored, truckEdited])
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="user-sources"] [data-source-id]').length === 4)
+  const truckPicks = async (title) => {
+    await openSource(await page.locator('[data-testid="user-sources"] [data-source-id]', { hasText: title }).getAttribute('data-source-id'))
+    const out = []
+    for (const [x, y] of [[600, 200], [214, 220], [50, 300]]) {
+      const p = await srcToClient(x, y)
+      await page.mouse.move(p.x, p.y, { steps: 3 })
+      const label = (await page.locator('[data-testid="hover-label"]').count()) ? await page.textContent('[data-testid="hover-label"]') : ''
+      await page.mouse.click(p.x, p.y)
+      out.push(`${await count()}${label ? ` ${label}` : ''}`)
+    }
+    return out.join(' / ')
+  }
+  const knownTruck = await truckPicks('фудтрак зеленый')
+  const guessedTruck = await truckPicks('фудтрак измененный')
+  check('свои SVG: копия встроенной иллюстрации получает ее разметку', knownTruck === '48 Фургон / 9 Продавщица / 11 Мужчина со стаканом', knownTruck)
+  check('свои SVG: эвристика на измененном фудтраке — фургон, продавщица, мужчина', guessedTruck === '48 / 9 / 11', guessedTruck)
+
   // Библиотеки
   const where = (name) => page.locator(`[data-component-id][data-name="${name}"]`).first().evaluate((el) => el.closest('section').dataset.libraryName)
   await page.click('[data-testid="new-library"]')

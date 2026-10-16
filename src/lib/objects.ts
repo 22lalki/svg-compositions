@@ -3,21 +3,25 @@ import { listShapes } from './extract'
 
 /**
  * Логические объекты исходника (персонаж, животное, предмет) для выделения одним кликом.
- * Встроенные исходники размечены вручную (public/sources/objects.json), эта эвристика — для загруженных SVG;
- * ее точность на эталонной разметке меряет scripts/eval-objects.mjs.
+ * Встроенные исходники (и загруженные копии тех же иллюстраций) размечены вручную (public/sources/objects.json),
+ * эта эвристика — для остальных загруженных SVG; ее точность на эталонной разметке меряет scripts/eval-objects.mjs.
  *
  * 1. Группа верхнего уровня — готовый объект: в unDraw персонажи и животные часто сгруппированы
  *    (девушка, собака и косточка в 02, мужчина в 07, девушка и пес в 04). Группа почти со всеми фигурами
  *    рисунка (≥ 85%, как обертка из Figma) считается контейнером, объекты ищутся внутри нее.
- *    Повторяющийся мелкий предмет из 2–3 фигур (летящая купюра, брызга) — тоже готовая единица.
+ *    Группа с подложкой внутри — сцена: объекты ищутся в ней. Повторяющийся мелкий предмет из 2–3 фигур
+ *    (летящая купюра, брызга) — тоже готовая единица.
  * 2. Плоские фигуры собираются в прогоны: иллюстрацию рисуют объект за объектом, поэтому фигура
  *    продолжает текущий прогон, если касается его по реальной форме (растровые маски с допуском)
  *    или стоит вплотную, как строки текста. Две крупные формы, лишь краем наложенные друг на друга
- *    (кроны соседних деревьев), и пересекающиеся длинные линии (орбиты) прогон не связывают.
+ *    (кроны соседних деревьев), и пересекающиеся длинные линии (орбиты) прогон не связывают;
+ *    ряд одинаковых фигур (фестоны навеса) начинает новый прогон.
  * 3. Обрывки (до 3 фигур: шапка, ботинки, арка колеса) присоединяются к соседнему по порядку объекту,
  *    которого касаются, — если между ними нет другого полноценного объекта. Деталь, лежащая на объекте
  *    или внутри его контура (звезды в окне, глаз собаки, волосы), присоединяется к нему на любом расстоянии;
- *    так же — многодетальный узел, целиком лежащий на объекте (крестовина на корпусе геймпада).
+ *    так же — многодетальный узел, целиком лежащий на объекте (крестовина на корпусе геймпада), если только он
+ *    не внутри объекта (продавщица в окне фургона за навесом и прилавком). Порядок весомее геометрии: деталь,
+ *    нарисованная между частями мужчины, — его, даже если лежит на борту фургона.
  * 4. Прогоны, нарисованные вперемешку (рука, торс, брюки, снова рука) или сильно наложенные (пальто на торсе),
  *    — один объект.
  * 5. Фон — отдельный объект: земля во всю ширину, подложка на весь рисунок или на большую часть нарисованного
@@ -31,7 +35,8 @@ const ALPHA_MIN = 40
 /** Допуск касания в пикселях растра (~1,4% рисунка): стекла окна за тонкой рамкой — один объект */
 const TOUCH_TOL = 5
 
-type Mask = { x0: number; y0: number; w: number; h: number; data: Uint8Array; count: number }
+/** Маска формы в пикселях растра; opaque — фигура не полупрозрачная тень или блик */
+type Mask = { x0: number; y0: number; w: number; h: number; data: Uint8Array; count: number; opaque?: boolean }
 
 type Cluster = {
   shapes: number[]
@@ -121,7 +126,8 @@ function buildMasks(model: SourceModel): Mask[] {
         count++
       }
     }
-    return { x0, y0, w: x1 - x0, h: y1 - y0, data, count }
+    const alpha = parseFloat(cs.opacity) * (cs.fill !== 'none' ? parseFloat(cs.fillOpacity) : 1)
+    return { x0, y0, w: x1 - x0, h: y1 - y0, data, count, opaque: alpha >= 0.5 }
   })
 }
 
@@ -257,8 +263,11 @@ function isFloorLine(i: number, model: SourceModel, masks: Mask[]): boolean {
 
 type Unit = { shapes: number[]; group: boolean; item?: boolean }
 
-/** Единицы: атомарные группы и отдельные плоские фигуры, в порядке документа */
-function collectUnits(model: SourceModel): Unit[] {
+/**
+ * Единицы: атомарные группы и отдельные плоские фигуры, в порядке документа.
+ * Группа с подложкой внутри (экран VR вместе с путником на нем) — сцена, а не объект: ищем объекты в ней
+ */
+function collectUnits(model: SourceModel, isPanel: (i: number) => boolean): Unit[] {
   const total = model.shapes.length
   const units: Unit[] = []
   const walk = (container: Element) => {
@@ -273,6 +282,7 @@ function collectUnits(model: SourceModel): Unit[] {
         .filter((i): i is number => i !== undefined)
       if (inside.length === 0) continue
       if (inside.length >= total * 0.85 && inside.length > 1) walk(child) // контейнер всего рисунка, а не объект
+      else if (inside.length > 1 && inside.some(isPanel)) walk(child)
       else if (inside.length === 1) units.push({ shapes: inside, group: false })
       else units.push({ shapes: inside, group: true })
     }
@@ -414,8 +424,25 @@ export function detectObjects(model: SourceModel): number[][] {
     return coverage(masks[i]!, bd.shapes.map((j) => masks[j]!)) >= 0.8
   }
 
+  const units = markItems(
+    collectUnits(model, (i) => isBackground(model.shapes[i]!, model) || isDominant(i, masks, total)),
+    model,
+    masks,
+  )
+  /** Фигуры одного вида и размера (фестоны навеса, ступени, зубцы) */
+  const sameShape = (a: number, b: number) => {
+    const [p, q] = [model.shapes[a]!, model.shapes[b]!]
+    const close = (x: number, y: number) => Math.abs(x - y) <= 0.15 * Math.max(x, y)
+    return p.el.localName === q.el.localName && close(p.bbox.width, q.bbox.width) && close(p.bbox.height, q.bbox.height)
+  }
+  /** С единицы p начинается ряд из трех и более одинаковых фигур подряд */
+  const startsRow = (p: number) => {
+    const row = units.slice(p, p + 3)
+    return row.length === 3 && row.every((u) => !u.group && u.shapes.length === 1) && sameShape(row[0]!.shapes[0]!, row[1]!.shapes[0]!) && sameShape(row[0]!.shapes[0]!, row[2]!.shapes[0]!)
+  }
+
   // 1–2, 5: группы, фон и прогоны в порядке документа
-  for (const unit of markItems(collectUnits(model), model, masks)) {
+  for (const [p, unit] of units.entries()) {
     if (unit.group) {
       clusters.push({ shapes: unit.shapes, group: true, background: false, overlays: new Set() })
       if (!unit.item) current = null // повторяющийся предмет не прерывает объект, рядом с которым нарисован
@@ -425,14 +452,14 @@ export function detectObjects(model: SourceModel): number[][] {
     const i = unit.shapes[0]!
     // Разделитель во всю ширину подложки — ее часть, даже у нижнего края (нижняя линия в окне интерфейса — не земля)
     const ib = model.shapes[i]!.bbox
-    if (backdrop && ib.width * ib.height < 0.7 * VW * VH && spansBackdrop(i, backdrop)) {
+    // Рамка-контур сразу после подложки (рамка экрана VR, обводка облака) — ее слой
+    if (backdrop && ((ib.width * ib.height < 0.7 * VW * VH && spansBackdrop(i, backdrop)) || (layered && outlineOf(i, backdrop.shapes[0]!)))) {
       backdrop.shapes.push(i)
       continue
     }
     if ((isBackground(model.shapes[i]!, model) || isDominant(i, masks, total)) && !isObjectBody(i, model, masks, total)) {
-      // Слои одной подложки: рамка окна и белое поле в ней, небо и полупрозрачная дымка поверх, обводка облака со сдвигом
-      if (backdrop && layered && (coverage(masks[i]!, backdrop.shapes.map((j) => masks[j]!)) >= 0.97 || outlineOf(i, backdrop.shapes[0]!)))
-        backdrop.shapes.push(i)
+      // Слои одной подложки: рамка окна и белое поле в ней, небо и полупрозрачная дымка поверх
+      if (backdrop && layered && coverage(masks[i]!, backdrop.shapes.map((j) => masks[j]!)) >= 0.97) backdrop.shapes.push(i)
       else {
         backdrop = { shapes: [i], group: false, background: true, overlays: new Set() }
         clusters.push(backdrop)
@@ -450,7 +477,10 @@ export function detectObjects(model: SourceModel): number[][] {
       current.shapes.push(i)
       continue
     }
-    if (current && current.shapes.some((j) => linked(i, j))) {
+    // Ряд одинаковых фигур — отдельная деталь, а не продолжение того, чего коснулся: фестоны навеса над головой
+    // продавщицы принадлежат навесу. Внутри самого ряда прогон продолжается
+    const row = current !== null && startsRow(p) && !sameShape(current.shapes[current.shapes.length - 1]!, i)
+    if (current && !row && current.shapes.some((j) => linked(i, j))) {
       current.shapes.push(i)
       continue
     }
@@ -485,8 +515,39 @@ export function detectObjects(model: SourceModel): number[][] {
     return out
   }
   const area = (c: Cluster) => info(c).area
+  /** Число видимых фигур: штрихи нулевой площади не делают обрывок «полноценным объектом» */
+  const visible = (c: Cluster) => c.shapes.filter((i) => masks[i]!.count).length
   const own = (c: Cluster) => info(c).own
   const span = (c: Cluster) => info(c).span
+  /**
+   * Сетка по растру: объекты, чьи рамки (с запасом 8 px) задевают ячейку. Строится на проход;
+   * объект, выросший в этом проходе, найдется в следующем
+   */
+  const CELL = 24
+  const gridOf = (list: Cluster[]) => {
+    const cells = new Map<number, Cluster[]>()
+    const range = (c: Cluster) => {
+      const [x0, y0, x1, y1] = info(c).box
+      if (!Number.isFinite(x0)) return null
+      return [Math.floor((x0 - 8) / CELL), Math.floor((y0 - 8) / CELL), Math.floor((x1 + 8) / CELL), Math.floor((y1 + 8) / CELL)] as const
+    }
+    for (const c of list) {
+      const r = range(c)
+      if (!r) continue
+      for (let gy = r[1]; gy <= r[3]; gy++) for (let gx = r[0]; gx <= r[2]; gx++) {
+        const key = gy * 4096 + gx
+        const bucket = cells.get(key)
+        if (bucket) bucket.push(c)
+        else cells.set(key, [c])
+      }
+    }
+    return (c: Cluster) => {
+      const r = range(c)
+      const out = new Set<Cluster>()
+      if (r) for (let gy = r[1]; gy <= r[3]; gy++) for (let gx = r[0]; gx <= r[2]; gx++) for (const t of cells.get(gy * 4096 + gx) ?? []) out.add(t)
+      return out
+    }
+  }
   /** Рамки объектов сближены не дальше pad пикселей растра — иначе ни касания, ни наложения быть не может */
   const close = (a: Cluster, b: Cluster, pad = 8) => {
     const [p, q] = [info(a).box, info(b).box]
@@ -494,7 +555,11 @@ export function detectObjects(model: SourceModel): number[][] {
   }
   const touching = (a: Cluster, b: Cluster) =>
     a.shapes.some((i) => b.shapes.some((j) => !crossing(i, j) && touches(masks[j]!, masks[i]!)))
+  /** Объект, которому сейчас принадлежит фигура */
+  const owner = new Map<number, Cluster>()
+  for (const c of clusters) for (const i of c.shapes) owner.set(i, c)
   const merge = (into: Cluster, from: Cluster, asOverlay: boolean) => {
+    for (const i of from.shapes) owner.set(i, into)
     into.shapes.push(...from.shapes)
     for (const i of from.shapes) if (asOverlay || from.overlays.has(i)) into.overlays.add(i)
     clusters.splice(clusters.indexOf(from), 1)
@@ -517,6 +582,20 @@ export function detectObjects(model: SourceModel): number[][] {
   const overlapShare = (earlier: Cluster, later: Cluster) =>
     earlier.shapes.reduce((n, i) => n + coverage(masks[i]!, later.shapes.map((j) => masks[j]!)) * masks[i]!.count, 0) /
     Math.max(area(earlier), 1)
+
+  /**
+   * Фигура внутри объекта, а не на нем: лежит на объекте, и его же части, нарисованные позже, закрывают ее спереди
+   * (продавщицу в окне фургона — навес и прилавок). Крестовину на корпусе геймпада спереди ничто не закрывает;
+   * мелочь за прилавком (бутылочки соусов) — обрывок и решается раньше
+   */
+  const inside = (run: Cluster, host: Cluster) => {
+    if (overlapShare(run, host) < 0.9) return false
+    const last = Math.max(...run.shapes)
+    const front = host.shapes.filter((j) => j > last && masks[j]!.opaque).map((j) => masks[j]!) // тени поверх не в счет
+    if (!front.length) return false
+    const hidden = run.shapes.reduce((n, i) => n + coverage(masks[i]!, front) * masks[i]!.count, 0)
+    return hidden >= 0.03 * area(run)
+  }
 
   /**
    * Деталь внутри полого контура (сектор внутри обводки диаграммы, знак в рамке карточки): рамка фигуры объекта
@@ -566,54 +645,74 @@ export function detectObjects(model: SourceModel): number[][] {
     Math.min(...own(a).flatMap((i) => own(b).map((j) => Math.abs(i - j) - Math.abs(before[Math.max(i, j)]! - before[Math.min(i, j) + 1]!))))
 
   // 3–4 повторяем, пока что-то склеивается: после слияния торса и брюк к ним может прилипнуть ботинок
-  for (let changed = true; changed; ) {
+  /**
+   * Соседи обрывка по порядку документа (без невидимых штрихов, точек поля и фона) с обеих сторон принадлежат одному
+   * объекту, и обрывок его касается: рука со стаканом нарисована между ботинками и брюками мужчины — значит, она его,
+   * хотя лежит на борту фургона
+   */
+  const sandwich = (piece: Cluster) => {
+    const skip = (k: number) => piece.shapes.includes(k) || !masks[k]!.count || field.includes(k) || owner.get(k)?.background
+    let a = Math.min(...piece.shapes) - 1
+    while (a >= 0 && skip(a)) a--
+    let b = Math.max(...piece.shapes) + 1
+    while (b < masks.length && skip(b)) b++
+    const [pa, pb] = [a >= 0 ? owner.get(a) : undefined, b < masks.length ? owner.get(b) : undefined]
+    const host = pa && pb ? (pa === pb ? pa : undefined) : (pa ?? pb)
+    return host && !host.group && touching(piece, host) ? host : null
+  }
+
+  let patient = true // пока что-то склеивается, деталь может подождать ближнего соседа
+  for (let changed = true; changed || patient; ) {
+    if (!changed) patient = false
     changed = false
     // 3: обрывки — по одному, от меньших к большим; выросший после слияния обрывок уже не обрывок
-    const pieces = clusters.filter((c) => !c.group && !c.background && c.shapes.length <= 3).sort((a, b) => area(a) - area(b))
+    const pieces = clusters.filter((c) => !c.group && !c.background && visible(c) <= 3).sort((a, b) => area(a) - area(b))
+    const around = gridOf(clusters.filter((c) => !c.background))
     for (const piece of pieces) {
-      if (!alive(piece) || piece.shapes.length > 3 || inField(piece)) continue
+      if (!alive(piece) || visible(piece) > 3 || inField(piece)) continue
       const mid = (span(piece)[0] + span(piece)[1]) / 2
       // Деталь «поверх» судим по ее главной фигуре: тень горы на соседней горе не тянет за собой саму гору
       const main = piece.shapes.reduce((m, i) => (masks[i]!.count > masks[m]!.count ? i : m))
-      let best: { target: Cluster; gap: number; overlay: boolean } | null = null
-      for (const target of clusters) {
-        if (target === piece || target.background || !close(piece, target)) continue
+      let lay: { target: Cluster; gap: number } | null = null
+      const others: Array<{ target: Cluster; gap: number }> = []
+      for (const target of around(piece)) {
+        if (target === piece || !alive(target) || !close(piece, target)) continue
+        const g = gap(piece, target)
         // Деталь, хотя бы наполовину лежащая на объекте (волосы, нарисованные последними) или внутри его контура, —
         // к нему, на любом расстоянии
-        const lies = coverage(masks[main]!, target.shapes.map((j) => masks[j]!)) >= 0.5 || insideOutline(piece, target)
-        if (area(piece) <= area(target) && lies) {
-          const g = gap(piece, target)
-          if (!best || !best.overlay || g < best.gap) best = { target, gap: g, overlay: true }
-          continue
-        }
-        // К группе исходника (персонаж, животное) по касанию не прилипаем: рядом стоящий предмет — отдельный объект
-        if (best?.overlay || target.group || area(piece) > 2 * area(target)) continue
-        const g = gap(piece, target)
-        if (g > 12 || !neighbors(piece, target) || !touching(piece, target)) continue
-        // При равном расстоянии — объект, нарисованный после: unDraw рисует снизу вверх (ботинки, ноги, туловище)
-        const later = (c: Cluster) => (span(c)[0] + span(c)[1]) / 2 > mid
-        if (!best || g < best.gap || (g === best.gap && later(target) && !later(best.target))) best = { target, gap: g, overlay: false }
+        if (area(piece) <= area(target) && (coverage(masks[main]!, target.shapes.map((j) => masks[j]!)) >= 0.5 || insideOutline(piece, target))) {
+          if (!lay || g < lay.gap) lay = { target, gap: g }
+        } else others.push({ target, gap: g })
       }
+      // Касание проверяется лениво, от ближних по порядку
+      others.sort((a, b) => a.gap - b.gap)
+      let touch: { target: Cluster; gap: number } | null = null
+      // При равном расстоянии — объект, нарисованный после: unDraw рисует снизу вверх (ботинки, ноги, туловище)
+      const later = (c: Cluster) => (span(c)[0] + span(c)[1]) / 2 > mid
+      for (const o of others) {
+        if (o.gap > 12 || (touch && o.gap > touch.gap)) break
+        // К группе исходника (персонаж, животное) по касанию не прилипаем: рядом стоящий предмет — отдельный объект
+        if (o.target.group || area(piece) > 2 * area(o.target) || !neighbors(piece, o.target) || !touching(piece, o.target)) continue
+        if (!touch || (later(o.target) && !later(touch.target))) touch = o
+      }
+      // Лежать на объекте весомее касания. Но если деталь касается чего-то, нарисованного ближе по порядку, она ждет,
+      // пока соседи соберутся: руке мужчины, лежащей на борту фургона, нужно дождаться самого мужчины
+      const host = sandwich(piece)
+      const waits = lay !== null && patient && others.some((o) => o.gap < lay!.gap && touching(piece, o.target))
+      const best = host ? { target: host, overlay: false } : lay ? (waits ? null : { ...lay, overlay: true }) : touch ? { ...touch, overlay: false } : null
       if (best) {
         merge(best.target, piece, best.overlay)
         changed = true
       }
     }
     if (changed) continue
-    // 3б: многодетальный узел целиком на другом объекте (крестовина на корпусе геймпада) — его часть
-    for (const run of clusters.filter((c) => !c.group && !c.background && c.shapes.length > 3)) {
-      const target = clusters.find((t) => t !== run && !t.background && close(run, t, 0) && area(t) >= area(run) && overlapShare(run, t) >= 0.98)
-      if (!target) continue
-      merge(target, run, true)
-      changed = true
-      break
-    }
-    if (changed) continue
     // 4: прогоны вперемешку
     const runs = clusters.filter((c) => !c.group && !c.background)
+    const nearRuns = gridOf(runs)
     outer: for (const a of runs) {
-      for (const b of runs) {
+      for (const b of nearRuns(a)) {
         if (a === b || !close(a, b) || !(interleaved(a, b) || interleaved(b, a)) || !touching(a, b)) continue
+        if (inside(a, b) || inside(b, a)) continue // продавщица нарисована между частями фургона, но она внутри него
         merge(a, b, false)
         changed = true
         break outer
@@ -632,6 +731,21 @@ export function detectObjects(model: SourceModel): number[][] {
         changed = true
         break
       }
+    }
+    if (changed) continue
+    // 4в: многодетальный узел целиком на другом объекте (крестовина на корпусе геймпада) — его часть,
+    //     если только он не внутри объекта (человек в окне фургона). С конца рисунка: передние части фургона
+    //     (навес, прилавок) присоединяются раньше, чем решается судьба продавщицы за ними
+    const nodes = clusters.filter((c) => !c.group && !c.background && visible(c) > 3).sort((a, b) => span(b)[0] - span(a)[0])
+    const nearAll = gridOf(clusters.filter((c) => !c.background))
+    for (const run of nodes) {
+      const target = [...nearAll(run)].find(
+        (t) => t !== run && close(run, t, 0) && area(t) >= area(run) && overlapShare(run, t) >= 0.98 && !inside(run, t),
+      )
+      if (!target) continue
+      merge(target, run, true)
+      changed = true
+      break
     }
   }
 

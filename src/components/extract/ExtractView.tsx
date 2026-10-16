@@ -98,8 +98,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         const next = analyzeSource(svg, meta)
         setAnnotated(null)
         setModel(next)
-        // Готовая разметка объектов для встроенных исходников (иначе — эвристика)
-        void loadSourceObjects(meta, next.shapes.length).then((list) => !cancelled && setAnnotated(list))
+        // Готовая разметка объектов: у встроенных исходников и у загруженных копий тех же иллюстраций (иначе — эвристика)
+        void loadSourceObjects(meta, next).then((list) => !cancelled && setAnnotated(list))
       })
       .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
     return () => {
