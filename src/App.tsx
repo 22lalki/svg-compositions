@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { SourceMeta } from './types'
-import { loadComponents, loadScene, saveScene } from './lib/storage'
+import { loadComponents, loadScene, loadUserSources, saveScene } from './lib/storage'
 import { useLibrary } from './store/library'
 import { DEFAULT_SCENE, useScene } from './store/scene'
 import { notify, useUi } from './store/ui'
@@ -10,12 +10,17 @@ import { CanvasView } from './components/canvas/CanvasView'
 import { ExtractView } from './components/extract/ExtractView'
 import { ConfirmHost, Toasts } from './components/ui'
 import { ContextMenuHost } from './components/ContextMenu'
+import { FileDropOverlay } from './components/FileDropOverlay'
 
 async function bootstrap() {
-  const [manifest, components, scene] = await Promise.all([
+  const [manifest, userSources, components, scene] = await Promise.all([
     fetch('/sources/manifest.json').then((r) => {
       if (!r.ok) throw new Error(`manifest.json: ${r.status}`)
-      return r.json() as Promise<SourceMeta[]>
+      return r.json() as Promise<Omit<SourceMeta, 'kind'>[]>
+    }),
+    loadUserSources().catch((e: unknown) => {
+      console.error(e)
+      return []
     }),
     loadComponents().catch((e: unknown) => {
       console.error(e)
@@ -24,7 +29,10 @@ async function bootstrap() {
     }),
     loadScene().catch(() => null),
   ])
-  useUi.getState().setSources(manifest)
+  useUi.getState().initSources(
+    manifest.map((m) => ({ ...m, kind: 'builtin' as const })),
+    userSources,
+  )
   useLibrary.getState().init(components)
   // Объекты, чьих компонентов уже нет, на сцену не попадают
   const ids = new Set(components.map((c) => c.id))
@@ -94,6 +102,7 @@ export function App() {
         </aside>
       </div>
       <Toasts />
+      <FileDropOverlay />
       <ContextMenuHost />
       <ConfirmHost />
     </div>

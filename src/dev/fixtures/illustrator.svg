@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 300 200" style="enable-background:new 0 0 300 200;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill:#FF6584;}
+	.st1{fill:none;stroke:#3F3D56;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;}
+</style>
+<polygon class="st0" points="40,160 100,40 160,160"/>
+<polyline class="st1" points="180,160 210,60 240,160 270,60"/>
+<line class="st1" x1="20" y1="185" x2="280" y2="185"/>
+</svg>

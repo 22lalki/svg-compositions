@@ -4,10 +4,17 @@
  *   A — оригинал, где оставлены только выбранные фигуры, обрезанный по bbox выделения;
  *   B — извлеченный компонент.
  * Затем сравниваем пиксели. Совпадение означает, что transform, цвета, порядок и градиенты перенесены верно.
+ *
+ * Плюс «чужие» SVG из ./fixtures (стили-классы, <use>/<symbol>, вложенные <svg>, без размеров, Illustrator):
+ * нормализация при загрузке не должна менять вид, а извлечение из нормализованного файла — совпадать с ним.
+ * malicious.svg проверяет очистку: ни скриптов, ни обработчиков, ни внешних ссылок.
  */
 import type { SourceMeta } from '../types'
 import { analyzeSource, extractComponent, isAxisAlignedShape, listShapes, type SourceModel } from '../lib/extract'
 import { svgDataUrl, SVG_NS } from '../lib/svg'
+import { prepareSvgText } from '../lib/importSvg'
+
+const FIXTURES = import.meta.glob('./fixtures/*.svg', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 type CaseResult = {
   source: string
@@ -166,11 +173,78 @@ async function verifySource(meta: SourceMeta, host: HTMLElement): Promise<CaseRe
     ['even', all.filter((i) => i % 2 === 0)],
     ['odd', all.filter((i) => i % 2 === 1)],
     ['rotated', model.shapes.filter((s) => !isAxisAlignedShape(s)).map((s) => s.index)],
-    ['gradient', model.shapes.filter((s) => /url\(/.test(s.el.getAttribute('fill') ?? '')).map((s) => s.index)],
+    ['gradient', model.shapes.filter((s) => /url\(/.test(`${s.el.getAttribute('fill')} ${s.el.getAttribute('style')}`)).map((s) => s.index)],
   ]
   const out: CaseResult[] = []
   for (const [mode, indices] of cases) {
     const r = await runCase(model, mode, indices)
+    if (r) out.push(r)
+  }
+  return out
+}
+
+function parseSvg(text: string): SVGSVGElement {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
+  return document.importNode(doc.documentElement, true) as unknown as SVGSVGElement
+}
+
+const row = (source: string, mode: string, diffPixels: number, painted: number): CaseResult => ({
+  source,
+  mode,
+  shapes: 0,
+  defs: 0,
+  width: 0,
+  height: 0,
+  painted,
+  diffPixels,
+  diffRatio: painted ? Number((diffPixels / painted).toFixed(5)) : diffPixels ? 1 : 0,
+  outside: 0,
+  idsOk: true,
+})
+
+async function verifyFixture(name: string, text: string, host: HTMLElement): Promise<CaseResult[]> {
+  const source = `fx:${name}`
+  if (name === 'malicious') {
+    const { svgText } = prepareSvgText(text)
+    const banned = ['<script', 'onload', 'onclick', 'javascript:', 'evil.example', 'foreignobject', '<set', '@import']
+    const found = banned.filter((b) => svgText.toLowerCase().includes(b))
+    const w = window as unknown as { __pwned?: number }
+    host.replaceChildren(parseSvg(svgText))
+    await new Promise((r) => setTimeout(r, 50))
+    return [row(source, 'sanitize', found.length + (w.__pwned ? 1 : 0), 1)]
+  }
+  const { svgText } = prepareSvgText(text)
+  const normalized = parseSvg(svgText)
+  const [vx, vy, vw, vh] = normalized.getAttribute('viewBox')!.split(/[\s,]+/).map(Number) as [number, number, number, number]
+  const scale = SCALE_TARGET / Math.max(vw, vh)
+  const w = Math.round(vw * scale)
+  const h = Math.round(vh * scale)
+  // 1) Нормализация не меняет вид: оригинал и нормализованный файл в одном окне
+  const frame = (svg: SVGSVGElement) => {
+    svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`)
+    svg.setAttribute('width', String(w))
+    svg.setAttribute('height', String(h))
+    svg.setAttribute('preserveAspectRatio', 'none')
+    return svgDataUrl(new XMLSerializer().serializeToString(svg))
+  }
+  const [a, b] = await Promise.all([loadImage(frame(parseSvg(text))), loadImage(frame(parseSvg(svgText)))])
+  const pa = rasterize(a, w, h)
+  const pb = rasterize(b, w, h)
+  let painted = 0
+  let diff = 0
+  for (let i = 0; i < pa.length; i += 4) {
+    if (Math.max(255 - pa[i]!, 255 - pa[i + 1]!, 255 - pa[i + 2]!) > 8) painted++
+    if (Math.max(Math.abs(pa[i]! - pb[i]!), Math.abs(pa[i + 1]! - pb[i + 1]!), Math.abs(pa[i + 2]! - pb[i + 2]!)) > 48) diff++
+  }
+  const out = [row(source, 'normalize', diff, painted)]
+  // 2) Извлечение из нормализованного файла
+  const svg = parseSvg(svgText)
+  svg.style.cssText = 'width:300px;height:300px'
+  host.replaceChildren(svg)
+  const model = analyzeSource(svg, { id: source, title: name, originalName: `${name}.svg`, kind: 'user' })
+  const all = model.shapes.map((s) => s.index)
+  for (const [mode, indices] of [['all', all], ['even', all.filter((i) => i % 2 === 0)]] as const) {
+    const r = await runCase(model, mode, [...indices])
     if (r) out.push(r)
   }
   return out
@@ -181,6 +255,10 @@ async function main() {
   const manifest = (await fetch('/sources/manifest.json').then((r) => r.json())) as SourceMeta[]
   const results: CaseResult[] = []
   for (const meta of manifest) results.push(...(await verifySource(meta, host)))
+  for (const [path, text] of Object.entries(FIXTURES)) {
+    const name = path.replace(/^.*\/|\.svg$/g, '')
+    results.push(...(await verifyFixture(name, text, host)))
+  }
   host.replaceChildren()
   ;(window as unknown as { __verify: CaseResult[] }).__verify = results
   document.title = 'verify: done'

@@ -16,12 +16,12 @@ import {
   unionRects,
   type Mat,
 } from './matrix'
-import { refsOf, rewriteRefs, selfAndDescendants, serializeFragment, SVG_NS, URL_REF_RE } from './svg'
+import { normalizeUrlRefs, refsOf, rewriteRefs, selfAndDescendants, serializeFragment, SVG_NS } from './svg'
 
 /** Что считаем фигурами при выделении */
 export const SHAPE_SELECTOR = 'path, circle, ellipse, rect, polygon, polyline, line'
 /** Контейнеры, содержимое которых не рисуется само по себе */
-const NON_RENDERED = 'defs, clipPath, mask, pattern, symbol, marker, linearGradient, radialGradient, filter'
+export const NON_RENDERED = 'defs, clipPath, mask, pattern, symbol, marker, linearGradient, radialGradient, filter'
 
 /** Наследуемые свойства, которые переносим на клон, если они пришли от предка */
 const INHERITED_PROPS = [
@@ -226,10 +226,6 @@ function ancestorsOpacity(el: Element, root: Element): number {
   return product
 }
 
-function normalizeUrl(value: string): string {
-  return value.replace(URL_REF_RE, (_w, _q: string, id: string) => `url(#${id})`)
-}
-
 /** Клон фигуры с явными цветами там, где они пришли от предков */
 function cloneShape(shape: SourceShape, root: SVGSVGElement): Element {
   const el = shape.el
@@ -248,7 +244,7 @@ function cloneShape(shape: SourceShape, root: SVGSVGElement): Element {
     if (!inherited) continue
     cs ??= getComputedStyle(el)
     const value = cs.getPropertyValue(prop)
-    if (value) clone.setAttribute(prop, normalizeUrl(value))
+    if (value) clone.setAttribute(prop, normalizeUrlRefs(value))
   }
   const groupOpacity = ancestorsOpacity(el, root)
   if (groupOpacity < 1 - 1e-6) {

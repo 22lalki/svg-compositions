@@ -1,9 +1,11 @@
-import { createStore, get, set } from 'idb-keyval'
-import type { Component, Scene, SceneObject } from '../types'
+import { createStore, del, get, set } from 'idb-keyval'
+import type { Component, Scene, SceneObject, SourceMeta } from '../types'
 
 const store = createStore('svg-constructor', 'kv')
 
-const KEYS = { components: 'components', scene: 'scene' } as const
+const KEYS = { components: 'components', scene: 'scene', userSources: 'userSources' } as const
+/** Текст загруженного SVG хранится отдельно от списка: список маленький, файлы могут быть большими */
+const sourceTextKey = (id: string) => `source:${id}`
 
 export async function loadComponents(): Promise<Component[]> {
   const list = await get<Component[]>(KEYS.components, store)
@@ -33,3 +35,13 @@ export async function loadScene(): Promise<Scene | null> {
 }
 
 export const saveScene = (scene: Scene) => set(KEYS.scene, scene, store)
+
+export async function loadUserSources(): Promise<SourceMeta[]> {
+  const list = await get<SourceMeta[]>(KEYS.userSources, store)
+  return Array.isArray(list) ? list.map((s) => ({ ...s, kind: 'user' as const })) : []
+}
+
+export const saveUserSources = (list: SourceMeta[]) => set(KEYS.userSources, list, store)
+export const loadUserSourceText = (id: string) => get<string>(sourceTextKey(id), store)
+export const saveUserSourceText = (id: string, text: string) => set(sourceTextKey(id), text, store)
+export const deleteUserSourceText = (id: string) => del(sourceTextKey(id), store)

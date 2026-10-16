@@ -1,9 +1,16 @@
-/** Запись из public/sources/manifest.json */
+/**
+ * Исходная иллюстрация.
+ * builtin — встроенная библиотека (public/sources, manifest.json), общая для всех;
+ * user — SVG, загруженный пользователем: хранится в IndexedDB его браузера.
+ */
 export type SourceMeta = {
   id: string
   title: string
-  file: string
   originalName: string
+  kind: 'builtin' | 'user'
+  /** Файл в public/sources (только builtin) */
+  file?: string
+  createdAt?: number
 }
 
 /** Компонент библиотеки: фрагмент исходника, сдвинутый в (0,0) */

@@ -14,12 +14,12 @@ const results = await page.evaluate(() => window.__verify)
 await browser.close()
 
 let failed = 0
-console.log('src  mode      shapes defs  size          diff px   ratio  clip  ids')
+console.log('source          mode      shapes defs  size          diff px   ratio  clip  ids')
 for (const r of results) {
   const ok = r.diffRatio <= MAX_DIFF_RATIO && r.outside === 0 && r.idsOk
   if (!ok) failed++
   console.log(
-    `${r.source}   ${r.mode.padEnd(9)} ${String(r.shapes).padStart(5)} ${String(r.defs).padStart(4)}  ` +
+    `${r.source.padEnd(15)} ${r.mode.padEnd(9)} ${String(r.shapes).padStart(5)} ${String(r.defs).padStart(4)}  ` +
       `${`${r.width}×${r.height}`.padEnd(13)} ${String(r.diffPixels).padStart(7)}  ${r.diffRatio.toFixed(5)}  ${String(r.outside).padStart(4)}  ` +
       `${r.idsOk ? 'ok' : 'FAIL'}${ok ? '' : '   <-- FAIL'}`,
   )

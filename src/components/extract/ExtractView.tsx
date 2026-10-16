@@ -17,6 +17,8 @@ import {
 } from '../../lib/extract'
 import { shortId } from '../../lib/ids'
 import { standaloneSvg, svgDataUrl } from '../../lib/svg'
+import { sanitizeSvg } from '../../lib/importSvg'
+import { loadSourceText } from '../../lib/sources'
 import { useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
@@ -38,16 +40,6 @@ const rectFrom = (a: Point, b: Point): Rect => ({
 const marqueeMode = (e: { shiftKey: boolean; altKey: boolean }): MarqueeMode =>
   e.altKey ? 'subtract' : e.shiftKey ? 'add' : 'replace'
 
-/** Исходники статичные и свои, но лишнее (скрипты, обработчики) все равно вычищаем */
-function sanitize(root: Element) {
-  root.querySelectorAll('script, foreignObject').forEach((n) => n.remove())
-  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
-    for (const attr of Array.from(el.attributes)) {
-      if (/^on/i.test(attr.name) || /^\s*javascript:/i.test(attr.value)) el.removeAttribute(attr.name)
-    }
-  }
-}
-
 export function ExtractView({ sourceId }: { sourceId: string }) {
   const meta = useUi((s) => s.sources.find((x) => x.id === sourceId))
   const closeSource = useUi((s) => s.closeSource)
@@ -66,23 +58,25 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [stage, setStage] = useState({ w: 0, h: 0 })
   const [name, setName] = useState('')
 
-  // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили
+  // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
+  // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
+  const metaRef = useRef(meta)
+  metaRef.current = meta
+  const loadedId = meta?.id
   useEffect(() => {
+    const meta = metaRef.current
     if (!meta) return
     let cancelled = false
     setModel(null)
     setError(null)
-    fetch(`/sources/${meta.file}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${meta.file}: HTTP ${r.status}`)
-        return r.text()
-      })
+    loadSourceText(meta)
       .then((text) => {
         if (cancelled || !hostRef.current) return
         const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
         const root = doc.documentElement
         if (root.localName !== 'svg' || doc.querySelector('parsererror')) throw new Error('файл не является SVG')
-        sanitize(root)
+        // Загруженные файлы очищены при импорте, встроенные — свои; чистим еще раз на всякий случай
+        sanitizeSvg(root)
         const svg = document.importNode(root, true) as unknown as SVGSVGElement
         if (!svg.hasAttribute('viewBox')) {
           svg.setAttribute('viewBox', `0 0 ${parseFloat(svg.getAttribute('width') ?? '0')} ${parseFloat(svg.getAttribute('height') ?? '0')}`)
@@ -99,7 +93,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     return () => {
       cancelled = true
     }
-  }, [meta])
+  }, [loadedId])
 
   useEffect(() => {
     const el = stageRef.current
@@ -343,7 +337,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         <Divider />
         <div className="min-w-0 px-2">
           <div className="truncate text-sm font-semibold">
-            <span className="text-accent">{meta.id}</span> {meta.title}
+            <span className="text-accent">{meta.kind === 'builtin' ? meta.id : 'Мой SVG'}</span> {meta.title}
           </div>
         </div>
         <div className="flex-1" />

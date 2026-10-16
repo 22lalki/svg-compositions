@@ -705,10 +705,78 @@ for (let i = 0; i < 5; i++) await page.keyboard.press('Control+z')
 const afterUndoDeleted = await page.locator('[data-layer-id]').count()
 check('undo после удаления компонента не возвращает «битые» объекты', afterUndoDeleted <= 4 && errors.length === 0, `объектов: ${afterUndoDeleted}`)
 
-for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
+// 9. Свои SVG: загрузка кнопкой и перетаскиванием, извлечение, сохранение, удаление
+{
+  const FIXTURES = path.join(ROOT, 'src', 'dev', 'fixtures')
+  const userCards = page.locator('[data-testid="user-sources"] [data-source-id]')
+  const builtinBefore = await page.locator('[data-testid="builtin-sources"] [data-source-id]').count()
+  const notSvg = path.join(OUT, 'not-an-svg.txt')
+  writeFileSync(notSvg, 'hello')
+  await page.setInputFiles('[data-testid="upload-input"]', [path.join(FIXTURES, 'styles.svg'), path.join(FIXTURES, 'use-symbol.svg'), notSvg])
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="user-sources"] [data-source-id]').length === 2)
+  const toastsText = (await page.locator('[role="status"]').allTextContents()).join(' | ')
+  check('свои SVG: загрузка кнопкой (2 SVG), не-SVG отклонен', (await userCards.count()) === 2 && toastsText.includes('not-an-svg.txt'), toastsText)
+  check('встроенная библиотека не меняется', (await page.locator('[data-testid="builtin-sources"] [data-source-id]').count()) === builtinBefore && builtinBefore === 20)
+
+  // Перетаскивание файла в окно
+  const illustrator = readFileSync(path.join(FIXTURES, 'illustrator.svg'), 'utf8')
+  await page.evaluate((text) => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([text], 'Логотип.svg', { type: 'image/svg+xml' }))
+    window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt }))
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, cancelable: true }))
+  }, illustrator)
+  await page.waitForSelector('[data-source-svg]')
+  const opened = await page.textContent('header + div main')
+  check('свои SVG: перетаскивание в окно загружает и открывает файл', (await userCards.count()) === 3 && opened.includes('Логотип'))
+
+  // Извлечение из загруженного файла (стили-классы перенесены в атрибуты)
+  await page.waitForFunction(() => document.querySelector('[data-source-svg]')?.getBoundingClientRect().width > 100)
+  await page.keyboard.press('Control+a')
+  const selectedCount = await page.textContent('[data-testid="selection-count"]')
+  await saveComponent('Мой логотип')
+  const myCard = page.locator('[data-component-id][data-name="Мой логотип"]')
+  const myCardText = await myCard.textContent()
+  check('свои SVG: компонент из загруженного файла в библиотеке', selectedCount.includes('3 из 3') && myCardText.includes('из Логотип'), myCardText)
+  await backToCanvas()
+  await clearCanvas()
+  await dropComponent('Мой логотип', 600, 400)
+  const mySvg = await exportSvg('_user-check')
+  check('свои SVG: компонент на холсте и в экспорте, без <style> и классов', /data-name="Мой логотип"/.test(mySvg) && !/<style|class=/.test(mySvg))
+
+  // После перезагрузки загруженные файлы на месте
+  await page.reload()
+  await page.waitForSelector('[data-testid="canvas"] svg')
+  await page.waitForFunction(() => {
+    const imgs = document.querySelectorAll('[data-testid="user-sources"] [data-source-id] img')
+    return imgs.length === 3 && Array.from(imgs).every((i) => i.complete && i.naturalWidth > 0)
+  })
+  check('свои SVG: после перезагрузки на месте, превью грузятся', (await userCards.count()) === 3)
+
+  // Переименование и удаление через контекстное меню
+  const logo = page.locator('[data-testid="user-sources"] [data-source-id]', { hasText: 'Логотип' })
+  await logo.click({ button: 'right' })
+  await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Переименовать' }).click()
+  await page.getByLabel('Название исходника').fill('Мой логотип v2')
+  await page.keyboard.press('Enter')
+  const renamed = await myCard.textContent()
+  await page.locator('[data-testid="user-sources"] [data-source-id]', { hasText: 'Мой логотип v2' }).click({ button: 'right' })
+  await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Удалить' }).click()
+  const delText = await page.locator('[role="dialog"]').textContent()
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Удалить', exact: true }).click()
+  await wait(300)
+  check('свои SVG: переименование видно в библиотеке', renamed.includes('из Мой логотип v2'), renamed)
+  check(
+    'свои SVG: удаление исходника не трогает компоненты и холст',
+    (await userCards.count()) === 2 && delText.includes('останутся') && (await myCard.count()) === 1 && (await page.locator('[data-layer-id]').count()) === 1,
+  )
+  check('свои SVG: компонент удаленного исходника подписан', (await myCard.textContent()).includes('удаленный исходник'))
+}
+
+for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
 writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
-check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 2, `навигаций: ${navigations}`)
+check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 3, `навигаций: ${navigations}`)
 
 await browser.close()
 const failed = checks.filter((c) => !c.ok)

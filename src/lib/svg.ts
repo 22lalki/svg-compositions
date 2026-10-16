@@ -34,6 +34,11 @@ export const svgDataUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${e
 /** url(#id) в атрибутах и style; кавычки и абсолютный URL (из getComputedStyle) допускаются */
 export const URL_REF_RE = /url\(\s*(['"]?)[^)'"#]*#([^)'"\s]+)\1\s*\)/g
 
+/** url("http://host/page#id") из getComputedStyle → url(#id) */
+export function normalizeUrlRefs(value: string): string {
+  return value.replace(URL_REF_RE, (_w, _q: string, id: string) => `url(#${id})`)
+}
+
 /** Все id, на которые ссылается элемент своими атрибутами */
 export function refsOf(el: Element): string[] {
   const ids: string[] = []
