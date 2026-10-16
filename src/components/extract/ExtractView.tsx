@@ -20,7 +20,6 @@ import { standaloneSvg, svgDataUrl } from '../../lib/svg'
 import { sanitizeSvg } from '../../lib/importSvg'
 import { loadSourceObjects, loadSourceText, type SourceObject } from '../../lib/sources'
 import { detectObjects } from '../../lib/objects'
-import { annotateWithAi } from '../../lib/aiObjects'
 import { GENERAL_LIBRARY_NAME, libraryName, useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
@@ -64,31 +63,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [stage, setStage] = useState({ w: 0, h: 0 })
   const [name, setName] = useState('')
   const [mode, setMode] = useState<ClickMode>('objects')
-  /** Разметка объектов (objects.json или ИИ); null — нет, работает эвристика */
+  /** Разметка объектов из objects.json; null — нет, работает эвристика */
   const [annotated, setAnnotated] = useState<SourceObject[] | null>(null)
-  /** Состояние ИИ-разметки загруженного SVG */
-  const [ai, setAi] = useState<AiState>({ state: 'idle' })
-  const aiRun = useRef(0)
-
-  /** ИИ-разметка своего SVG: пока идет запрос, работает эвристика; результат кешируется в IndexedDB */
-  function runAi(m: SourceModel, force: boolean) {
-    const current = metaRef.current
-    if (!current || current.kind !== 'user') return
-    const run = ++aiRun.current
-    setAi({ state: 'running' })
-    const hint = detectObjects(m)
-    void annotateWithAi(current, m, hint, force).then((result) => {
-      if (run !== aiRun.current) return
-      if (result.status === 'done') {
-        setAnnotated(result.objects)
-        const named = result.objects.filter((o) => o.name).length
-        setAi({ state: 'done', count: named })
-        if (!result.cached) notify(`ИИ определил объекты: ${named}`)
-      } else {
-        setAi({ state: result.status, message: result.message })
-      }
-    })
-  }
 
   // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
   // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
@@ -123,14 +99,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         setAnnotated(null)
         setModel(next)
         // Готовая разметка объектов для встроенных исходников (иначе — эвристика)
-        // Свои SVG размечает ИИ (с кешем), встроенные — готовая разметка
-        if (meta.kind === 'user') runAi(next, false)
-        else void loadSourceObjects(meta, next.shapes.length).then((list) => !cancelled && setAnnotated(list))
+        void loadSourceObjects(meta, next.shapes.length).then((list) => !cancelled && setAnnotated(list))
       })
       .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
     return () => {
       cancelled = true
-      aiRun.current++
     }
   }, [loadedId])
 
@@ -467,7 +440,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           </div>
         </div>
         <div className="flex-1" />
-        {meta.kind === 'user' && <AiStatus ai={ai} onRerun={() => model && runAi(model, true)} />}
         <div className="flex rounded-md border border-line p-0.5 text-xs font-medium" role="group" aria-label="Что выделяет клик">
           {(
             [
@@ -689,60 +661,3 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     </div>
   )
 }
-
-type AiState = { state: 'idle' | 'running' | 'done' | 'unavailable' | 'error' | 'too_many'; message?: string; count?: number }
-
-/** Состояние ИИ-разметки объектов загруженного SVG */
-function AiStatus({ ai, onRerun }: { ai: AiState; onRerun: () => void }) {
-  const base = 'mr-1 inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium'
-  if (ai.state === 'running')
-    return (
-      <span
-        className={`${base} text-accent-strong`}
-        data-testid="ai-status"
-        data-state="running"
-        title="Claude определяет объекты рисунка. Пока можно выделять — работает автоматическое определение"
-      >
-        <Icon name="loader" size={13} className="animate-spin" /> ИИ размечает…
-      </span>
-    )
-  if (ai.state === 'done')
-    return (
-      <button
-        type="button"
-        onClick={onRerun}
-        data-testid="ai-status"
-        data-state="done"
-        title="Объекты определены ИИ (Claude). Нажмите, чтобы разметить заново"
-        className={`${base} bg-accent-soft text-accent-strong hover:bg-accent/15`}
-      >
-        <Icon name="sparkles" size={13} /> ИИ: {ai.count} объектов
-      </button>
-    )
-  if (ai.state === 'error')
-    return (
-      <button
-        type="button"
-        onClick={onRerun}
-        data-testid="ai-status"
-        data-state="error"
-        title={`ИИ-разметка не удалась: ${ai.message ?? ''}. Нажмите, чтобы повторить`}
-        className={`${base} text-rose-600 hover:bg-rose-50`}
-      >
-        <Icon name="sparkles" size={13} /> ИИ: повторить
-      </button>
-    )
-  if (ai.state === 'unavailable' || ai.state === 'too_many')
-    return (
-      <span
-        className={`${base} text-muted`}
-        data-testid="ai-status"
-        data-state={ai.state}
-        title={`${ai.message ?? ''} — объекты определены автоматически`}
-      >
-        Объекты: авто
-      </span>
-    )
-  return null
-}
-

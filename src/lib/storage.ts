@@ -52,10 +52,3 @@ export const saveUserSources = (list: SourceMeta[]) => set(KEYS.userSources, lis
 export const loadUserSourceText = (id: string) => get<string>(sourceTextKey(id), store)
 export const saveUserSourceText = (id: string, text: string) => set(sourceTextKey(id), text, store)
 export const deleteUserSourceText = (id: string) => del(sourceTextKey(id), store)
-
-/** ИИ-разметка объектов загруженного SVG (кеш, чтобы не платить за повторный запрос) */
-export type StoredObjects = { shapeCount: number; objects: Array<{ name: string | null; shapes: number[] }>; createdAt: number }
-const objectsKey = (id: string) => `objects:${id}`
-export const loadUserObjects = (id: string) => get<StoredObjects>(objectsKey(id), store)
-export const saveUserObjects = (id: string, value: StoredObjects) => set(objectsKey(id), value, store)
-export const deleteUserObjects = (id: string) => del(objectsKey(id), store)
