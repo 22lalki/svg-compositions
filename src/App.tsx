@@ -9,6 +9,7 @@ import { LibraryPanel } from './components/LibraryPanel'
 import { CanvasView } from './components/canvas/CanvasView'
 import { ExtractView } from './components/extract/ExtractView'
 import { ConfirmHost, Toasts } from './components/ui'
+import { ContextMenuHost } from './components/ContextMenu'
 
 async function bootstrap() {
   const [manifest, components, scene] = await Promise.all([
@@ -93,6 +94,7 @@ export function App() {
         </aside>
       </div>
       <Toasts />
+      <ContextMenuHost />
       <ConfirmHost />
     </div>
   )

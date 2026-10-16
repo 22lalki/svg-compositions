@@ -6,6 +6,7 @@ import { useScene } from '../store/scene'
 import { notify, sourceLabel, useUi } from '../store/ui'
 import { Icon } from './Icon'
 import { confirmDialog } from './ui'
+import { openContextMenu } from './ContextMenu'
 
 export const COMPONENT_MIME = 'application/x-svg-component'
 
@@ -141,6 +142,23 @@ const ComponentCard = memo(function ComponentCard({
       }}
       className="group flex cursor-grab gap-2.5 rounded-lg border border-line bg-white p-2 transition hover:border-accent/60 hover:shadow-sm active:cursor-grabbing"
       onClick={() => !editing && addToCanvas()}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (editing) return
+        openContextMenu(e.clientX, e.clientY, [
+          { label: 'Добавить на холст', icon: 'plus', onSelect: addToCanvas },
+          {
+            label: 'Переименовать',
+            icon: 'pencil',
+            onSelect: () => {
+              setDraft(c.name)
+              setEditing(true)
+            },
+          },
+          'separator',
+          { label: 'Удалить', icon: 'trash', danger: true, onSelect: () => void remove() },
+        ])
+      }}
       title="Добавить на холст"
     >
       <div className="checker flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line p-1">

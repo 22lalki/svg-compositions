@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173'
 const VIDEO = process.argv.includes('--video')
-const EXAMPLES = path.join(ROOT, 'examples')
+const EXAMPLES = process.env.EXAMPLES_DIR ? path.resolve(process.env.EXAMPLES_DIR) : path.join(ROOT, 'examples')
 const OUT = path.join(ROOT, 'scripts', '.out')
 mkdirSync(EXAMPLES, { recursive: true })
 mkdirSync(OUT, { recursive: true })
@@ -274,13 +274,18 @@ async function grabPoint() {
     const id = document.querySelector('[data-testid="canvas"]').dataset.selected
     const el = document.querySelector(`[data-obj-id="${id}"]`)
     const r = el.getBoundingClientRect()
-    for (let t = 0; t < 400; t++) {
-      const a = t * 0.7
-      const rad = (t / 400) * Math.min(r.width, r.height) * 0.5
-      const x = r.x + r.width / 2 + Math.cos(a) * rad
-      const y = r.y + r.height / 2 + Math.sin(a) * rad
-      if (document.elementFromPoint(x, y)?.closest('[data-obj-id]') === el) return { x, y }
+    // Сетка по рамке объекта: ближайшая к центру точка, где сверху именно этот объект
+    let best = null
+    for (let i = 1; i < 40; i++) {
+      for (let j = 1; j < 40; j++) {
+        const x = r.x + (r.width * i) / 40
+        const y = r.y + (r.height * j) / 40
+        if (document.elementFromPoint(x, y)?.closest('[data-obj-id]') !== el) continue
+        const d = Math.hypot(x - r.x - r.width / 2, y - r.y - r.height / 2)
+        if (!best || d < best.d) best = { x, y, d }
+      }
     }
+    if (best) return { x: best.x, y: best.y }
     return null
   })
 }
@@ -597,6 +602,58 @@ check('панель слоев: перетаскивание меняет пор
 const orderSvg = await exportSvg('_order-check')
 const exportOrder = Array.from(orderSvg.matchAll(/<g id="obj-([^"]+)"/g), (m) => m[1])
 check('порядок слоев на холсте = порядок в экспорте', JSON.stringify([...rowsAfter].reverse()) === JSON.stringify(exportOrder))
+
+// 7b. Контекстное меню (ПКМ) у курсора
+const menu = page.locator('[data-testid="context-menu"]')
+const menuItem = (name) => menu.getByRole('menuitem', { name })
+async function rightClickSelected() {
+  const g = await grabPoint()
+  await page.mouse.click(g.x, g.y, { button: 'right' })
+  await menu.waitFor()
+  return g
+}
+await page.locator('[data-layer-id]').nth(2).click()
+const targetId = await page.getAttribute('[data-testid="canvas"]', 'data-selected')
+await page.keyboard.press('Escape')
+await page.locator(`[data-layer-id="${targetId}"]`).click()
+const at = await rightClickSelected()
+const mbox = await menu.boundingBox()
+check('ПКМ по объекту: меню открывается у курсора', Math.hypot(mbox.x - at.x, mbox.y - at.y) < 5 || (mbox.x < at.x && mbox.y < at.y + 5), `курсор ${Math.round(at.x)},${Math.round(at.y)}, меню ${Math.round(mbox.x)},${Math.round(mbox.y)}`)
+check('ПКМ по объекту: объект выбирается', (await page.getAttribute('[data-testid="canvas"]', 'data-selected')) === targetId)
+await menuItem('Отразить по горизонтали').click()
+check('меню: «Отразить» применяется, меню закрывается', (await page.textContent('[data-testid="selection-info"]')).includes('⇋') && (await menu.count()) === 0)
+await rightClickSelected()
+await page.keyboard.press('Escape')
+check('меню: Esc закрывает меню, выделение остается', (await menu.count()) === 0 && (await page.getAttribute('[data-testid="canvas"]', 'data-selected')) === targetId)
+const layersBefore = await page.locator('[data-layer-id]').count()
+await rightClickSelected()
+await menuItem('Дублировать').click()
+const afterDup = await page.locator('[data-layer-id]').count()
+await rightClickSelected()
+await menuItem('Удалить').click()
+check('меню: «Дублировать» и «Удалить»', afterDup === layersBefore + 1 && (await page.locator('[data-layer-id]').count()) === layersBefore)
+await page.locator('[data-layer-id]').first().click()
+await rightClickSelected()
+check(
+  'меню: у верхнего слоя «вперед» неактивны, «назад» доступны',
+  (await menuItem('На передний план').isDisabled()) && (await menuItem('Вперед').isDisabled()) && (await menuItem('Назад').isEnabled()),
+)
+await page.keyboard.press('Escape')
+await page.locator('[data-layer-id]').first().click({ button: 'right' })
+check('ПКМ в панели слоев открывает то же меню', await menuItem('На задний план').isVisible())
+await page.keyboard.press('Escape')
+const vp = page.viewportSize()
+await page.mouse.click(vp.width - 5, vp.height - 5, { button: 'right' })
+const libCard = page.locator('[data-component-id]').last()
+const cardBox = await libCard.boundingBox()
+await libCard.click({ button: 'right', position: { x: cardBox.width - 4, y: cardBox.height - 4 } })
+const libMenu = await menu.boundingBox()
+check('меню у края окна не выходит за экран', libMenu.x + libMenu.width <= vp.width && libMenu.y + libMenu.height <= vp.height, `${Math.round(libMenu.x + libMenu.width)}×${Math.round(libMenu.y + libMenu.height)}`)
+await menuItem('Переименовать').click()
+const renameVisible = await libCard.getByLabel('Название компонента').isVisible()
+await page.keyboard.press('Escape')
+check('ПКМ по карточке библиотеки: «Переименовать»', renameVisible)
+for (let i = 0; i < 3; i++) await page.keyboard.press('Control+z')
 
 // 8. Удаление компонента, который стоит на холсте
 const truckCard = page.locator(`[data-component-id][data-name="${C.truck.name}"]`).first()

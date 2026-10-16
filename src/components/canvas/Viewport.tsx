@@ -1,4 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import type { Component, Point, Scene, SceneObject } from '../../types'
 import { sharedDefs } from '../../lib/exportSvg'
 import { framePoint, normalizeAngle, objectFrame, objectTransform, rotateVec } from '../../lib/transform'
@@ -7,6 +17,8 @@ import { useScene } from '../../store/scene'
 import { isTypingTarget } from '../ui'
 import { COMPONENT_MIME } from '../LibraryPanel'
 import { Icon } from '../Icon'
+import { closeContextMenu, openContextMenu } from '../ContextMenu'
+import { objectMenuItems } from './objectMenu'
 
 type View = { zoom: number; cx: number; cy: number }
 
@@ -250,6 +262,21 @@ export function Viewport() {
     startGesture({ kind: 'pan', startClient, orig: v, deselect: true, active: false })
   }
 
+  /** ПКМ по объекту (или по ручкам выделенного): выбрать его и открыть меню у курсора */
+  function onContextMenu(e: ReactMouseEvent<SVGSVGElement>) {
+    e.preventDefault()
+    if (gestureKind) return
+    const target = e.target as Element
+    const { scene: s, selectedId: sel, select } = useScene.getState()
+    const id = target.closest('[data-handle]') ? sel : target.closest('[data-obj-id]')?.getAttribute('data-obj-id')
+    if (!id || !s.objects.some((o) => o.id === id)) {
+      closeContextMenu()
+      return
+    }
+    select(id)
+    openContextMenu(e.clientX, e.clientY, objectMenuItems(id))
+  }
+
   function onDragOver(e: ReactDragEvent) {
     if (e.dataTransfer.types.includes(COMPONENT_MIME)) {
       e.preventDefault()
@@ -301,7 +328,7 @@ export function Viewport() {
           className="block touch-none select-none"
           style={{ cursor }}
           onPointerDown={onPointerDown}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={onContextMenu}
         >
           <defs dangerouslySetInnerHTML={{ __html: defs }} />
           <rect

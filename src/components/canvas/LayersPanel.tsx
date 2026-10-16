@@ -3,6 +3,8 @@ import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
 import { componentPreview } from '../LibraryPanel'
 import { Icon } from '../Icon'
+import { openContextMenu } from '../ContextMenu'
+import { objectMenuItems } from './objectMenu'
 
 const LAYER_MIME = 'application/x-scene-layer'
 
@@ -52,6 +54,11 @@ export function LayersPanel() {
                 }}
                 onDragEnd={() => setDrop(null)}
                 onClick={() => useScene.getState().select(o.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  useScene.getState().select(o.id)
+                  openContextMenu(e.clientX, e.clientY, objectMenuItems(o.id))
+                }}
                 className={`relative flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm select-none ${
                   active ? 'bg-accent-soft text-accent-strong' : 'hover:bg-workspace'
                 }`}
