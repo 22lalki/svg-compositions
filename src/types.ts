@@ -23,6 +23,15 @@ export type Component = {
   defs: string // зависимости с префиксованными id
   markup: string // разметка без <svg>, сдвинутая в (0,0)
   createdAt: number
+  /** Библиотека пользователя; нет — компонент в общей библиотеке */
+  libraryId?: string
+}
+
+/** Пользовательская библиотека (папка) компонентов. Общая библиотека — компоненты без libraryId */
+export type Library = {
+  id: string
+  name: string
+  createdAt: number
 }
 
 /** Экземпляр компонента на холсте */

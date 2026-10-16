@@ -1,9 +1,9 @@
 import { createStore, del, get, set } from 'idb-keyval'
-import type { Component, Scene, SceneObject, SourceMeta } from '../types'
+import type { Component, Library, Scene, SceneObject, SourceMeta } from '../types'
 
 const store = createStore('svg-constructor', 'kv')
 
-const KEYS = { components: 'components', scene: 'scene', userSources: 'userSources' } as const
+const KEYS = { components: 'components', scene: 'scene', userSources: 'userSources', libraries: 'libraries' } as const
 /** Текст загруженного SVG хранится отдельно от списка: список маленький, файлы могут быть большими */
 const sourceTextKey = (id: string) => `source:${id}`
 
@@ -13,6 +13,13 @@ export async function loadComponents(): Promise<Component[]> {
 }
 
 export const saveComponents = (list: Component[]) => set(KEYS.components, list, store)
+
+export async function loadLibraries(): Promise<Library[]> {
+  const list = await get<Library[]>(KEYS.libraries, store)
+  return Array.isArray(list) ? list : []
+}
+
+export const saveLibraries = (list: Library[]) => set(KEYS.libraries, list, store)
 
 /** Сцена из хранилища; старые/битые записи приводятся к актуальной форме */
 export async function loadScene(): Promise<Scene | null> {

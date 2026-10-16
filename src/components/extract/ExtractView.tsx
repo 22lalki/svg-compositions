@@ -19,7 +19,8 @@ import { shortId } from '../../lib/ids'
 import { standaloneSvg, svgDataUrl } from '../../lib/svg'
 import { sanitizeSvg } from '../../lib/importSvg'
 import { loadSourceText } from '../../lib/sources'
-import { useLibrary } from '../../store/library'
+import { detectObjects } from '../../lib/objects'
+import { GENERAL_LIBRARY_NAME, libraryName, useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
 import { Button, Divider, IconButton } from '../ui'
@@ -28,6 +29,8 @@ import { isDialogOpen } from '../../store/confirm'
 import { mod, openContextMenu, type MenuItem } from '../../store/contextMenu'
 
 type MarqueeMode = 'replace' | 'add' | 'subtract'
+/** Объекты: клик выделяет персонажа/предмет целиком. Элементы: клик выделяет отдельную фигуру */
+type ClickMode = 'objects' | 'elements'
 const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8]
 
 const rectFrom = (a: Point, b: Point): Rect => ({
@@ -44,6 +47,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const meta = useUi((s) => s.sources.find((x) => x.id === sourceId))
   const closeSource = useUi((s) => s.closeSource)
   const fromThisSource = useLibrary((s) => s.components.filter((c) => c.sourceId === sourceId).length)
+  const libraries = useLibrary((s) => s.libraries)
+  const saveTarget = useLibrary((s) => s.saveTarget)
 
   const stageRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -57,6 +62,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [zoom, setZoom] = useState(1)
   const [stage, setStage] = useState({ w: 0, h: 0 })
   const [name, setName] = useState('')
+  const [mode, setMode] = useState<ClickMode>('objects')
 
   // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
   // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
@@ -116,6 +122,16 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const previewUrl = useMemo(() => (preview ? svgDataUrl(standaloneSvg(preview)) : null), [preview])
   const bounds = useMemo(() => (model ? selectionBounds(model, selected) : null), [model, selected])
 
+  // Логические объекты (персонаж, животное, предмет) для выделения одним кликом
+  const objects = useMemo(() => {
+    if (!model) return null
+    const list = detectObjects(model)
+    const of = new Int32Array(model.shapes.length)
+    list.forEach((shapes, k) => shapes.forEach((i) => (of[i] = k)))
+    return { list, of }
+  }, [model])
+  const objectOf = (i: number): number[] => objects?.list[objects.of[i]!] ?? [i]
+
   function toRoot(clientX: number, clientY: number): Point {
     const ctm = model?.svg.getScreenCTM()
     if (!ctm) return { x: 0, y: 0 }
@@ -154,11 +170,19 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       defs: result.defs,
       markup: result.markup,
       createdAt: Date.now(),
+      libraryId: saveTarget ?? undefined,
     }
     useLibrary.getState().add(component)
-    notify(`«${component.name}» сохранен в библиотеку`)
+    notify(`«${component.name}» сохранен в «${libraryName(libraries, saveTarget)}»`)
     setSelected(new Set())
     setName('')
+    setMode('objects')
+  }
+
+  /** Выделить объекты, в которые входят выбранные фигуры, и вернуться к режиму объектов */
+  function selectObjectsOfSelection() {
+    setSelected((prev) => new Set([...prev].flatMap((i) => objectOf(i))))
+    setMode('objects')
   }
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
@@ -200,16 +224,24 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           return mode === 'add' ? new Set([...prev, ...inside]) : new Set(inside)
         })
       } else if (hit === undefined) {
-        if (!m.shiftKey) setSelected(new Set())
-      } else if (m.shiftKey) {
-        setSelected((prev) => {
-          const next = new Set(prev)
-          if (next.has(hit)) next.delete(hit)
-          else next.add(hit)
-          return next
-        })
+        // Клик по пустому месту: снять выделение и вернуться к объектам
+        if (!m.shiftKey) {
+          setSelected(new Set())
+          setMode('objects')
+        }
       } else {
-        setSelected(new Set([hit]))
+        // Режим объектов — персонаж/предмет целиком, режим элементов — одна фигура
+        const target = mode === 'objects' ? objectOf(hit) : [hit]
+        if (m.shiftKey) {
+          setSelected((prev) => {
+            const next = new Set(prev)
+            const all = target.every((i) => next.has(i))
+            target.forEach((i) => (all ? next.delete(i) : next.add(i)))
+            return next
+          })
+        } else {
+          setSelected(new Set(target))
+        }
       }
     }
     const onUp = (ev: PointerEvent) => finish(ev)
@@ -219,6 +251,14 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     window.addEventListener('pointercancel', onCancel)
   }
 
+  /** Двойной клик — режим элементов: выделяется сама фигура, дальше Shift+клик добавляет фигуры */
+  function onDoubleClick(e: ReactMouseEvent<HTMLDivElement>) {
+    const hit = shapeAt(e.target)
+    if (hit === undefined) return
+    setMode('elements')
+    setSelected((prev) => (e.shiftKey ? new Set([...prev, hit]) : new Set([hit])))
+  }
+
   /** ПКМ: действия с фигурой под курсором и с выделением целиком */
   function onContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
     e.preventDefault()
@@ -226,43 +266,64 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     const hit = shapeAt(e.target)
     const items: MenuItem[] = []
     if (hit !== undefined) {
+      const obj = objectOf(hit)
+      const objSelected = obj.every((i) => selected.has(i))
       const isSelected = selected.has(hit)
-      const group = expandToParentGroup(model, new Set([hit]))
+      // Объект целиком (персонаж, предмет)
+      items.push({
+        label: `Выделить объект (${obj.length})`,
+        icon: 'marquee',
+        disabled: objSelected && selected.size === obj.length,
+        onSelect: () => {
+          setSelected(new Set(obj))
+          setMode('objects')
+        },
+      })
+      if (selected.size && !objSelected) {
+        items.push({
+          label: 'Добавить объект к выделению',
+          icon: 'plus',
+          onSelect: () => setSelected((prev) => new Set([...prev, ...obj])),
+        })
+      } else if (objSelected && selected.size > obj.length) {
+        items.push({
+          label: 'Убрать объект из выделения',
+          icon: 'minus',
+          onSelect: () => setSelected((prev) => new Set([...prev].filter((i) => !obj.includes(i)))),
+        })
+      }
+      items.push('separator')
+      // Отдельная фигура (режим элементов)
+      items.push({
+        label: 'Выделить только эту фигуру',
+        icon: 'pointer',
+        shortcut: 'двойной клик',
+        disabled: isSelected && selected.size === 1,
+        onSelect: () => {
+          setSelected(new Set([hit]))
+          setMode('elements')
+        },
+      })
       if (isSelected) {
         items.push({
-          label: 'Исключить из выделения',
+          label: 'Исключить фигуру из выделения',
           icon: 'minus',
-          shortcut: 'Shift+клик',
-          onSelect: () =>
-            setSelected((prev) => {
-              const next = new Set(prev)
-              next.delete(hit)
-              return next
-            }),
+          onSelect: () => {
+            setSelected((prev) => new Set([...prev].filter((i) => i !== hit)))
+            setMode('elements')
+          },
         })
       } else if (selected.size) {
         items.push({
-          label: 'Добавить к выделению',
+          label: 'Добавить фигуру к выделению',
           icon: 'plus',
-          shortcut: 'Shift+клик',
-          onSelect: () => setSelected((prev) => new Set([...prev, hit])),
+          onSelect: () => {
+            setSelected((prev) => new Set([...prev, hit]))
+            setMode('elements')
+          },
         })
       }
-      items.push(
-        {
-          label: selected.size ? 'Выделить только эту фигуру' : 'Выделить фигуру',
-          icon: 'pointer',
-          disabled: isSelected && selected.size === 1,
-          onSelect: () => setSelected(new Set([hit])),
-        },
-        {
-          label: group ? `Выделить ее группу (${group.size})` : 'Выделить ее группу',
-          icon: 'parent',
-          disabled: !group,
-          onSelect: () => group && setSelected(group),
-        },
-        'separator',
-      )
+      items.push('separator')
     }
     const all = model.shapes.length
     const expanded = selected.size ? expandToParentGroup(model, selected) : null
@@ -297,8 +358,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   }
 
   // Клавиатура режима выделения
-  const actions = useRef({ expand, selectAll, save, closeSource, selected })
-  actions.current = { expand, selectAll, save, closeSource, selected }
+  const actions = useRef({ expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection })
+  actions.current = { expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isDialogOpen()) return
@@ -307,12 +368,15 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       const a = actions.current
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        a.expand()
+        // Из элементов ↑ возвращает к объектам целиком, из объектов — к родительской группе исходника
+        if (a.mode === 'elements' && a.selected.size) a.selectObjectsOfSelection()
+        else a.expand()
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
         e.preventDefault()
         a.selectAll()
       } else if (e.key === 'Escape') {
-        if (a.selected.size) setSelected(new Set())
+        if (a.mode === 'elements') setMode('objects')
+        else if (a.selected.size) setSelected(new Set())
         else a.closeSource()
       } else if (e.key === 'Enter' && a.selected.size && !(e.target instanceof HTMLButtonElement)) {
         a.save()
@@ -326,6 +390,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const zoomIndex = ZOOMS.indexOf(zoom)
   const highlight = menuShape ?? hover
   const hoverShape = highlight !== null && (menuShape !== null || !selected.has(highlight)) ? model?.shapes[highlight] : undefined
+  // В режиме объектов подсвечиваем то, что выделит клик: объект целиком
+  const hoverObject =
+    model && hoverShape && mode === 'objects' && objectOf(hoverShape.index).length > 1
+      ? selectionBounds(model, objectOf(hoverShape.index))
+      : null
   const marqueeColor = marquee?.mode === 'subtract' ? '#e11d48' : marquee?.mode === 'add' ? '#059669' : '#6c63ff'
 
   return (
@@ -341,6 +410,26 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           </div>
         </div>
         <div className="flex-1" />
+        <div className="flex rounded-md border border-line p-0.5 text-xs font-medium" role="group" aria-label="Что выделяет клик">
+          {(
+            [
+              ['objects', 'Объекты', 'Клик выделяет объект целиком: персонажа, животное, предмет'],
+              ['elements', 'Элементы', 'Клик выделяет отдельную фигуру (или двойной клик по объекту)'],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <button
+              key={value}
+              type="button"
+              title={hint}
+              aria-pressed={mode === value}
+              data-testid={`mode-${value}`}
+              onClick={() => (value === 'objects' && selected.size ? selectObjectsOfSelection() : setMode(value))}
+              className={`rounded px-2 py-1 transition ${mode === value ? 'bg-accent text-white' : 'text-muted hover:text-ink'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="px-2 text-xs text-muted" data-testid="selection-count">
           Выделено: {selected.size}
           {model ? ` из ${model.shapes.length}` : ''}
@@ -367,6 +456,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           <div
             className="flex min-h-full w-max min-w-full cursor-crosshair p-6 select-none"
             onPointerDown={onPointerDown}
+            onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
           >
             <div
@@ -410,7 +500,22 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
                       vectorEffect="non-scaling-stroke"
                     />
                   )}
-                  {hoverShape && (
+                  {hoverObject && (
+                    <rect
+                      data-testid="hover-object"
+                      x={hoverObject.x}
+                      y={hoverObject.y}
+                      width={hoverObject.width}
+                      height={hoverObject.height}
+                      fill="#f59e0b"
+                      fillOpacity={0.08}
+                      stroke="#f59e0b"
+                      strokeWidth={1.5}
+                      strokeDasharray="5 3"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                  {hoverShape && (!hoverObject || menuShape !== null) && (
                     <polygon
                       points={hoverShape.outline.map((p) => `${p.x},${p.y}`).join(' ')}
                       fill="#f59e0b"
@@ -494,25 +599,39 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
               aria-label="Название компонента"
               className="h-9 w-full rounded-md border border-line px-2.5 text-sm outline-none focus:border-accent"
             />
+            <select
+              value={saveTarget ?? ''}
+              onChange={(e) => useLibrary.getState().setSaveTarget(e.target.value || null)}
+              aria-label="Библиотека для сохранения"
+              title="В какую библиотеку сохранить"
+              className="h-9 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-accent"
+            >
+              <option value="">{GENERAL_LIBRARY_NAME}</option>
+              {libraries.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
             <Button type="submit" variant="primary" className="h-9 w-full" disabled={!selected.size}>
               <Icon name="save" /> Сохранить в библиотеку
             </Button>
           </form>
           <ul className="mt-auto space-y-1.5 border-t border-line px-4 py-3 text-[11px] leading-snug text-muted">
             <li>
-              <b className="text-ink">Рамка</b> — фигуры целиком внутри нее
+              <b className="text-ink">Клик</b> — объект целиком (персонаж, предмет), <kbd>Shift</kbd>+клик — добавить/убрать
             </li>
             <li>
-              <kbd>Shift</kbd>+рамка — добавить, <kbd>Alt</kbd>+рамка — вычесть
+              <b className="text-ink">Двойной клик</b> — отдельная фигура, дальше <kbd>Shift</kbd>+клик добавляет фигуры
             </li>
             <li>
-              <b className="text-ink">Клик</b> — фигура под курсором, <kbd>Shift</kbd>+клик — добавить/убрать
+              <b className="text-ink">Рамка</b> — фигуры целиком внутри, <kbd>Shift</kbd> — добавить, <kbd>Alt</kbd> — вычесть
             </li>
             <li>
-              <kbd>↑</kbd> — до родительской группы, <kbd>Ctrl</kbd>+<kbd>A</kbd> — все
+              <kbd>↑</kbd> — к объекту / группе, <kbd>Ctrl</kbd>+<kbd>A</kbd> — все
             </li>
             <li>
-              <kbd>Enter</kbd> — сохранить, <kbd>Esc</kbd> — снять выделение / к холсту
+              <kbd>Enter</kbd> — сохранить, <kbd>Esc</kbd> — к объектам / снять выделение / к холсту
             </li>
           </ul>
         </aside>

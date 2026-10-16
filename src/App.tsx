@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { SourceMeta } from './types'
-import { loadComponents, loadScene, loadUserSources, saveScene } from './lib/storage'
+import { loadComponents, loadLibraries, loadScene, loadUserSources, saveScene } from './lib/storage'
 import { useLibrary } from './store/library'
 import { DEFAULT_SCENE, useScene } from './store/scene'
 import { notify, useUi } from './store/ui'
@@ -13,7 +13,7 @@ import { ContextMenuHost } from './components/ContextMenu'
 import { FileDropOverlay } from './components/FileDropOverlay'
 
 async function bootstrap() {
-  const [manifest, userSources, components, scene] = await Promise.all([
+  const [manifest, userSources, components, libraries, scene] = await Promise.all([
     fetch('/sources/manifest.json').then((r) => {
       if (!r.ok) throw new Error(`manifest.json: ${r.status}`)
       return r.json() as Promise<Omit<SourceMeta, 'kind'>[]>
@@ -27,13 +27,14 @@ async function bootstrap() {
       notify('IndexedDB недоступна: библиотека не будет сохраняться', 'error')
       return []
     }),
+    loadLibraries().catch(() => []),
     loadScene().catch(() => null),
   ])
   useUi.getState().initSources(
     manifest.map((m) => ({ ...m, kind: 'builtin' as const })),
     userSources,
   )
-  useLibrary.getState().init(components)
+  useLibrary.getState().init(components, libraries)
   // Объекты, чьих компонентов уже нет, на сцену не попадают
   const ids = new Set(components.map((c) => c.id))
   const base = scene ?? DEFAULT_SCENE
