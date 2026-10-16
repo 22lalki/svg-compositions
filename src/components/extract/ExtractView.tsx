@@ -536,7 +536,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         if (a.mode === 'elements') setMode('objects')
         else if (a.selected.size) setSelected(new Set())
         else a.closeSource()
-      } else if (e.key === 'Enter' && a.selected.size && !(e.target instanceof HTMLButtonElement)) {
+      } else if (
+        e.key === 'Enter' &&
+        a.selected.size &&
+        !(e.target instanceof Element && e.target.closest('button, input, select, textarea, a[href], [role="button"], [role="checkbox"], [role="menuitem"]'))
+      ) {
         a.save()
       }
     }

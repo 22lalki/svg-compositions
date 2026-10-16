@@ -723,7 +723,7 @@ check('undo после удаления компонента не возвращ
   const mergedReload = await count()
   await page.mouse.click(torso.x, torso.y, { button: 'right' })
   await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Переименовать «Девушка и собака»…' }).click()
-  await page.getByLabel('Название объекта').fill('Хозяйка с собакой')
+  await page.getByRole('textbox', { name: 'Название объекта' }).fill('Хозяйка с собакой')
   await page.keyboard.press('Enter')
   const renamedLabel = await hoverLabelAt(dog)
   await page.mouse.click(dog.x, dog.y)
@@ -832,7 +832,7 @@ check('undo после удаления компонента не возвращ
   check('клавиатура: Esc закрывает диалог, выделение на холсте остается', dialogGone && !!selAfter && selBefore === selAfter, `${selBefore} → ${selAfter}`)
   // Карточка библиотеки доступна с клавиатуры: Tab до нее, Enter — на холст
   const layersBefore = await page.locator('[data-layer-id]').count()
-  await page.locator('[data-component-id]').first().focus()
+  await page.locator('[data-component-id] [role="button"]').first().focus()
   await page.keyboard.press('Enter')
   await wait(200)
   check('клавиатура: Enter на карточке библиотеки добавляет компонент на холст', (await page.locator('[data-layer-id]').count()) === layersBefore + 1)
@@ -976,6 +976,22 @@ check('undo после удаления компонента не возвращ
   await cards.nth(0).click()
   await cards.nth(1).click()
   const pickedText = await page.textContent('[data-testid="library-remove-picked"]')
+  // Диалог модальный: зажатый Enter не подтверждает удаление, Tab не уходит из диалога, фокус возвращается
+  await page.locator('[data-testid="library-remove-picked"]').focus()
+  await page.keyboard.down('Enter')
+  await page.keyboard.down('Enter') // автоповтор
+  await page.keyboard.up('Enter')
+  const dialogOpen = (await page.locator('[role="dialog"]').count()) === 1
+  const cardsKept = await cards.count()
+  for (let k = 0; k < 5; k++) await page.keyboard.press('Tab')
+  const focusInDialog = await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))
+  await page.keyboard.press('Escape')
+  const focusBack = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))
+  check(
+    'диалог: зажатый Enter не удаляет, Tab остается в диалоге, после Esc фокус возвращается',
+    dialogOpen && cardsKept === before && focusInDialog && focusBack === 'library-remove-picked',
+    JSON.stringify({ dialogOpen, cardsKept, before, focusInDialog, focusBack }),
+  )
   await page.click('[data-testid="library-remove-picked"]')
   await page.locator('[role="dialog"]').getByRole('button', { name: 'Удалить', exact: true }).click()
   await wait(200)

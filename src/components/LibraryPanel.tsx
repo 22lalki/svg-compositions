@@ -355,7 +355,7 @@ function LibrarySection({
           <span className="shrink-0 text-xs text-muted">{filtered ? `${items.length}/${total}` : total}</span>
         </button>
         {library && !renaming && (
-          <span className="flex shrink-0 opacity-0 transition group-hover:opacity-100">
+          <span className="flex shrink-0 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
             <button
               type="button"
               title="Переименовать библиотеку"
@@ -497,7 +497,7 @@ const ComponentCard = memo(function ComponentCard({
         e.dataTransfer.setData(COMPONENT_MIME, c.id)
         e.dataTransfer.effectAllowed = 'copyMove'
       }}
-      className={`group flex gap-2.5 rounded-lg border bg-white p-2 transition outline-accent hover:shadow-sm focus-visible:outline-2 ${
+      className={`group flex gap-2.5 rounded-lg border bg-white p-2 transition hover:shadow-sm ${
         picking
           ? `cursor-pointer ${picked ? 'border-rose-400 bg-rose-50/60' : 'border-line hover:border-rose-300'}`
           : 'cursor-grab border-line hover:border-accent/60 active:cursor-grabbing'
@@ -505,17 +505,6 @@ const ComponentCard = memo(function ComponentCard({
       onClick={() => {
         if (picking) onPick([c.id], !picked)
         else if (!editing) addToCanvas()
-      }}
-      // С клавиатуры: Tab до карточки, Enter или пробел — на холст (в режиме «Очистить» — галочка), Shift+F10 — меню
-      role={picking ? 'checkbox' : 'button'}
-      aria-checked={picking ? picked : undefined}
-      tabIndex={0}
-      aria-label={picking ? c.name : `${c.name}: добавить на холст`}
-      onKeyDown={(e) => {
-        if (editing || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
-        e.preventDefault()
-        if (picking) onPick([c.id], !picked)
-        else addToCanvas()
       }}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -538,46 +527,63 @@ const ComponentCard = memo(function ComponentCard({
       }}
       title={picking ? 'Отметить для удаления' : 'Добавить на холст'}
     >
-      {picking && (
-        <span
-          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded border ${
-            picked ? 'border-rose-500 bg-rose-500 text-white' : 'border-line bg-white'
-          }`}
-          aria-hidden
-        >
-          {picked && <Icon name="check" size={12} />}
-        </span>
-      )}
-      <div className="checker flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line p-1">
-        <img src={componentPreview(c)} alt="" className="max-h-full max-w-full" draggable={false} />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-center">
-        {editing ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename()
-              if (e.key === 'Escape') {
-                setDraft(c.name)
-                setEditing(false)
-              }
-            }}
-            className="h-7 w-full rounded border border-accent px-1.5 text-sm outline-none"
-            aria-label="Название компонента"
-          />
-        ) : (
-          <div className="truncate text-sm font-medium" title={c.name}>
-            {c.name}
-          </div>
+      {/* С клавиатуры: Tab до карточки, Enter или пробел — на холст (в режиме «Очистить» — галочка), Shift+F10 — меню.
+          Роль — у этого блока, а не у li: кнопки «Переименовать» и «Удалить» не оказываются внутри другой кнопки */}
+      <div
+        role={editing ? undefined : picking ? 'checkbox' : 'button'}
+        aria-checked={picking ? picked : undefined}
+        tabIndex={editing ? undefined : 0}
+        aria-label={picking ? c.name : `${c.name}: добавить на холст`}
+        onKeyDown={(e) => {
+          if (editing || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+          e.preventDefault()
+          e.stopPropagation()
+          if (picking) onPick([c.id], !picked)
+          else addToCanvas()
+        }}
+        className="flex min-w-0 flex-1 gap-2.5 rounded-md outline-accent focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        {picking && (
+          <span
+            className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded border ${
+              picked ? 'border-rose-500 bg-rose-500 text-white' : 'border-line bg-white'
+            }`}
+            aria-hidden
+          >
+            {picked && <Icon name="check" size={12} />}
+          </span>
         )}
-        <div className="truncate text-xs text-muted">из {source}</div>
-        <div className="mt-0.5 text-[11px] text-muted">
-          {Math.round(c.width)}×{Math.round(c.height)}
-          {usage > 0 && <span className="ml-1.5 rounded bg-accent-soft px-1 text-accent-strong">на холсте: {usage}</span>}
+        <div className="checker flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line p-1">
+          <img src={componentPreview(c)} alt="" className="max-h-full max-w-full" draggable={false} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          {editing ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') {
+                  setDraft(c.name)
+                  setEditing(false)
+                }
+              }}
+              className="h-7 w-full rounded border border-accent px-1.5 text-sm outline-none"
+              aria-label="Название компонента"
+            />
+          ) : (
+            <div className="truncate text-sm font-medium" title={c.name}>
+              {c.name}
+            </div>
+          )}
+          <div className="truncate text-xs text-muted">из {source}</div>
+          <div className="mt-0.5 text-[11px] text-muted">
+            {Math.round(c.width)}×{Math.round(c.height)}
+            {usage > 0 && <span className="ml-1.5 rounded bg-accent-soft px-1 text-accent-strong">на холсте: {usage}</span>}
+          </div>
         </div>
       </div>
       <div className={`flex shrink-0 flex-col gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 ${picking ? 'hidden' : ''}`}>

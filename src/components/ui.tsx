@@ -54,22 +54,43 @@ export const Divider = () => <div className="mx-1 h-5 w-px bg-line" />
 
 export function ConfirmHost() {
   const request = useConfirm((s) => s.request)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!request) return
+    // Фокус вернется туда, откуда диалог открыли
+    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // В опасном диалоге фокус на «Отмене»: случайный Enter ничего не удалит
     if (inputRef.current) inputRef.current.select()
-    else confirmRef.current?.focus()
+    else (request.danger ? cancelRef : confirmRef).current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // Esc закрывает только диалог: выделение и режим под ним не трогаются
-      e.preventDefault()
-      e.stopPropagation()
-      resolveConfirm(false)
+      if (e.key === 'Escape') {
+        // Esc закрывает только диалог: выделение и режим под ним не трогаются
+        e.preventDefault()
+        e.stopPropagation()
+        resolveConfirm(false)
+      } else if (e.key === 'Enter' && e.repeat) {
+        // Зажатый Enter, которым диалог открыли, не должен его тут же подтвердить
+        e.preventDefault()
+        e.stopPropagation()
+      } else if (e.key === 'Tab') {
+        // Фокус не уходит из диалога: страница под ним недоступна, пока он открыт
+        const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button, input') ?? [])
+        if (!focusable.length) return
+        const i = focusable.indexOf(document.activeElement as HTMLElement)
+        const next = focusable[(i + (e.shiftKey ? -1 : 1) + focusable.length) % focusable.length]!
+        e.preventDefault()
+        next.focus()
+      }
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      if (returnTo?.isConnected && !useConfirm.getState().request) returnTo.focus()
+    }
   }, [request])
 
   if (!request) return null
@@ -77,15 +98,20 @@ export function ConfirmHost() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onPointerDown={() => close(false)}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal
+        aria-labelledby="confirm-title"
         className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold">{request.title}</h2>
+        <h2 id="confirm-title" className="text-base font-semibold">
+          {request.title}
+        </h2>
         <p className="mt-2 text-sm leading-relaxed text-muted">{request.message}</p>
         {request.input && (
           <input
+            key={request.id}
             ref={inputRef}
             defaultValue={request.input.value}
             placeholder={request.input.placeholder}
@@ -96,7 +122,9 @@ export function ConfirmHost() {
           />
         )}
         <div className="mt-5 flex justify-end gap-2">
-          <Button onClick={() => close(false)}>Отмена</Button>
+          <Button ref={cancelRef} onClick={() => close(false)}>
+            Отмена
+          </Button>
           <Button ref={confirmRef} variant={request.danger ? 'danger' : 'primary'} onClick={() => close(true)}>
             {request.confirmText}
           </Button>
