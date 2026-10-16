@@ -4,7 +4,6 @@
 
 - **Сервис:** https://svg-constructor.vercel.app
 - **Репозиторий:** https://github.com/22lalki/svg-constructor
-- **Демо-видео:** [examples/demo.webm](examples/demo.webm) (≈1 мин, демо-сценарий целиком)
 - **Примеры композиций:** [examples/](examples/)
 
 ![Вечерний фудтрак](examples/composition-1-food-truck.png)
