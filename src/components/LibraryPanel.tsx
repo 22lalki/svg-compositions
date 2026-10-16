@@ -38,6 +38,9 @@ export function LibraryPanel() {
   const [expanded, setExpanded] = useState(readExpanded)
   /** Библиотека, название которой сейчас редактируется */
   const [renaming, setRenaming] = useState<string | null>(null)
+  /** «Очистить»: режим выбора компонентов галочками для удаления */
+  const [picking, setPicking] = useState(false)
+  const [pickedRaw, setPicked] = useState<ReadonlySet<string>>(() => new Set())
 
   const usage = useMemo(() => {
     const m = new Map<string, number>()
@@ -71,6 +74,44 @@ export function LibraryPanel() {
     [toggle],
   )
 
+  // Выбранные — только существующие компоненты (другая вкладка могла что-то удалить)
+  const picked = useMemo(() => new Set(components.filter((c) => pickedRaw.has(c.id)).map((c) => c.id)), [components, pickedRaw])
+  const togglePick = useCallback((ids: string[], on: boolean) => {
+    setPicked((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) {
+        if (on) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }, [])
+  const stopPicking = () => {
+    setPicking(false)
+    setPicked(new Set())
+  }
+  const allVisiblePicked = visible.length > 0 && visible.every((c) => picked.has(c.id))
+
+  async function removePicked() {
+    const ids = [...picked]
+    if (!ids.length) return
+    const onCanvas = ids.filter((id) => (usage.get(id) ?? 0) > 0).length
+    const ok = await confirmDialog({
+      title: ids.length === components.length ? 'Очистить библиотеку?' : `Удалить компоненты (${ids.length})?`,
+      message:
+        `Выбранные компоненты (${ids.length}) будут удалены из библиотеки.` +
+        (onCanvas ? ` ${onCanvas} из них стоят на холсте — их объекты тоже уберутся с холста.` : '') +
+        ' Сами библиотеки (папки) останутся.',
+      confirmText: 'Удалить',
+      danger: true,
+    })
+    if (!ok) return
+    for (const id of ids) useScene.getState().purgeComponent(id)
+    useLibrary.getState().removeMany(ids)
+    stopPicking()
+    notify(`Удалено компонентов: ${ids.length}`)
+  }
+
   const sections: Array<{ id: string; library: Library | null; items: Component[] }> = [
     { id: GENERAL, library: null, items: visible.filter((c) => !c.libraryId) },
     ...libraries.map((l) => ({ id: l.id, library: l, items: visible.filter((c) => c.libraryId === l.id) })),
@@ -92,12 +133,13 @@ export function LibraryPanel() {
             <Icon name="plus" size={13} /> Библиотека
           </button>
         </div>
-        <select
-          value={activeFilter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Фильтр по исходнику"
-          className="h-8 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-accent"
-        >
+        <div className="flex gap-2">
+          <select
+            value={activeFilter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Фильтр по исходнику"
+            className="h-8 min-w-0 flex-1 rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-accent"
+          >
           <option value="all">Все исходники</option>
           {sources
             .filter((s) => sourceIds.has(s.id))
@@ -106,7 +148,48 @@ export function LibraryPanel() {
                 {sourceLabel(s)}
               </option>
             ))}
-        </select>
+          </select>
+          <button
+            type="button"
+            onClick={() => (picking ? stopPicking() : setPicking(true))}
+            disabled={!components.length && !picking}
+            aria-pressed={picking}
+            title="Удалить все компоненты или выбранные галочками"
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium whitespace-nowrap disabled:opacity-40 ${
+              picking ? 'border-accent bg-accent-soft text-accent-strong' : 'border-line hover:border-accent hover:text-accent-strong'
+            }`}
+            data-testid="library-clear"
+          >
+            <Icon name="eraser" size={13} /> Очистить
+          </button>
+        </div>
+        {picking && (
+          <div className="flex items-center gap-2 rounded-md bg-accent-soft/70 px-2 py-1.5 text-xs" data-testid="library-picking">
+            <label className="flex cursor-pointer items-center gap-1.5 font-medium whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={allVisiblePicked}
+                onChange={(e) => togglePick(visible.map((c) => c.id), e.target.checked)}
+                className="accent-accent"
+                aria-label="Выбрать все"
+              />
+              Все
+            </label>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={() => void removePicked()}
+              disabled={!picked.size}
+              className="rounded-md bg-rose-600 px-2 py-1 font-medium whitespace-nowrap text-white hover:bg-rose-700 disabled:opacity-40"
+              data-testid="library-remove-picked"
+            >
+              Удалить ({picked.size})
+            </button>
+            <button type="button" onClick={stopPicking} className="rounded-md px-1.5 py-1 font-medium whitespace-nowrap text-muted hover:text-ink">
+              Отмена
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="scroll-thin flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
@@ -122,6 +205,14 @@ export function LibraryPanel() {
             onRename={() => setRenaming(id)}
             onRenameDone={() => setRenaming(null)}
             filtered={activeFilter !== 'all'}
+            pick={
+              picking
+                ? {
+                    state: items.length && items.every((c) => picked.has(c.id)) ? 'all' : items.some((c) => picked.has(c.id)) ? 'some' : 'none',
+                    toggle: (on) => togglePick(items.map((c) => c.id), on),
+                  }
+                : null
+            }
           >
             {items.map((c) => (
               <ComponentCard
@@ -130,6 +221,9 @@ export function LibraryPanel() {
                 source={sourceLabel(sources.find((s) => s.id === c.sourceId))}
                 usage={usage.get(c.id) ?? 0}
                 onNewLibrary={createLibrary}
+                picking={picking}
+                picked={picked.has(c.id)}
+                onPick={togglePick}
               />
             ))}
           </LibrarySection>
@@ -149,6 +243,7 @@ function LibrarySection({
   onRename,
   onRenameDone,
   filtered,
+  pick,
   children,
 }: {
   library: Library | null
@@ -160,6 +255,8 @@ function LibrarySection({
   onRename: () => void
   onRenameDone: () => void
   filtered: boolean
+  /** Режим «Очистить»: выбраны ли компоненты этой библиотеки и как переключить их все */
+  pick: { state: 'none' | 'some' | 'all'; toggle: (on: boolean) => void } | null
   children: ReactNode
 }) {
   const [dropping, setDropping] = useState(false)
@@ -222,6 +319,19 @@ function LibrarySection({
       }}
     >
       <div className="group flex items-center gap-1 rounded-md px-1 py-1 hover:bg-workspace" onContextMenu={menu}>
+        {pick && (
+          <input
+            type="checkbox"
+            checked={pick.state === 'all'}
+            ref={(el) => {
+              if (el) el.indeterminate = pick.state === 'some'
+            }}
+            disabled={!items.length}
+            onChange={(e) => pick.toggle(e.target.checked)}
+            className="ml-0.5 accent-accent"
+            aria-label={`Выбрать все в «${name}»`}
+          />
+        )}
         <button
           type="button"
           onClick={onToggle}
@@ -276,8 +386,8 @@ function LibrarySection({
               {filtered
                 ? 'Нет компонентов из этого исходника'
                 : library
-                  ? 'Пусто. Перетащите сюда компоненты или выберите эту библиотеку при сохранении'
-                  : 'Откройте исходник слева, выделите персонажа или предмет и сохраните'}
+                  ? 'Пусто. Перетащите сюда компоненты из другой библиотеки'
+                  : 'Откройте исходник слева, выделите компонент и сохраните'}
             </li>
           )}
         </ul>
@@ -311,11 +421,18 @@ const ComponentCard = memo(function ComponentCard({
   source,
   usage,
   onNewLibrary,
+  picking,
+  picked,
+  onPick,
 }: {
   component: Component
   source: string
   usage: number
   onNewLibrary: (moveComponentId?: string) => Library
+  /** Режим «Очистить»: клик ставит галочку, а не добавляет на холст */
+  picking: boolean
+  picked: boolean
+  onPick: (ids: string[], on: boolean) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(c.name)
@@ -375,25 +492,34 @@ const ComponentCard = memo(function ComponentCard({
     <li
       data-component-id={c.id}
       data-name={c.name}
-      draggable={!editing}
+      draggable={!editing && !picking}
       onDragStart={(e) => {
         e.dataTransfer.setData(COMPONENT_MIME, c.id)
         e.dataTransfer.effectAllowed = 'copyMove'
       }}
-      className="group flex cursor-grab gap-2.5 rounded-lg border border-line bg-white p-2 transition outline-accent hover:border-accent/60 hover:shadow-sm focus-visible:outline-2 active:cursor-grabbing"
-      onClick={() => !editing && addToCanvas()}
-      // С клавиатуры: Tab до карточки, Enter или пробел — на холст, Shift+F10 — меню
-      role="button"
+      className={`group flex gap-2.5 rounded-lg border bg-white p-2 transition outline-accent hover:shadow-sm focus-visible:outline-2 ${
+        picking
+          ? `cursor-pointer ${picked ? 'border-rose-400 bg-rose-50/60' : 'border-line hover:border-rose-300'}`
+          : 'cursor-grab border-line hover:border-accent/60 active:cursor-grabbing'
+      }`}
+      onClick={() => {
+        if (picking) onPick([c.id], !picked)
+        else if (!editing) addToCanvas()
+      }}
+      // С клавиатуры: Tab до карточки, Enter или пробел — на холст (в режиме «Очистить» — галочка), Shift+F10 — меню
+      role={picking ? 'checkbox' : 'button'}
+      aria-checked={picking ? picked : undefined}
       tabIndex={0}
-      aria-label={`${c.name}: добавить на холст`}
+      aria-label={picking ? c.name : `${c.name}: добавить на холст`}
       onKeyDown={(e) => {
         if (editing || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
         e.preventDefault()
-        addToCanvas()
+        if (picking) onPick([c.id], !picked)
+        else addToCanvas()
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        if (editing) return
+        if (editing || picking) return
         const { clientX: x, clientY: y } = e
         openContextMenu(x, y, [
           { label: 'Добавить на холст', icon: 'plus', onSelect: addToCanvas },
@@ -410,8 +536,18 @@ const ComponentCard = memo(function ComponentCard({
           { label: 'Удалить', icon: 'trash', danger: true, onSelect: () => void remove() },
         ])
       }}
-      title="Добавить на холст"
+      title={picking ? 'Отметить для удаления' : 'Добавить на холст'}
     >
+      {picking && (
+        <span
+          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded border ${
+            picked ? 'border-rose-500 bg-rose-500 text-white' : 'border-line bg-white'
+          }`}
+          aria-hidden
+        >
+          {picked && <Icon name="check" size={12} />}
+        </span>
+      )}
       <div className="checker flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line p-1">
         <img src={componentPreview(c)} alt="" className="max-h-full max-w-full" draggable={false} />
       </div>
@@ -444,7 +580,7 @@ const ComponentCard = memo(function ComponentCard({
           {usage > 0 && <span className="ml-1.5 rounded bg-accent-soft px-1 text-accent-strong">на холсте: {usage}</span>}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+      <div className={`flex shrink-0 flex-col gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 ${picking ? 'hidden' : ''}`}>
         <button
           type="button"
           title="Переименовать"

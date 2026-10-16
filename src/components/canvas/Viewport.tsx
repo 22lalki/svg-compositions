@@ -126,7 +126,7 @@ export function Viewport() {
   // Пробел — временная рука
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const control = e.target instanceof Element && e.target.closest('button, a[href], select, [role="button"], [role="menuitem"]')
+      const control = e.target instanceof Element && e.target.closest('button, a[href], select, [role="button"], [role="menuitem"], [role="checkbox"]')
       if (e.code === 'Space' && !isTypingTarget(e.target) && !control && !isDialogOpen()) {
         e.preventDefault()
         setSpaceDown(true)

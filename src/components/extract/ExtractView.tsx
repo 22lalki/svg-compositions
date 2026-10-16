@@ -227,13 +227,27 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     if (model) setSelected(new Set(model.shapes.map((s) => s.index)))
   }
 
+  /**
+   * «Выделить всю группу» (кнопка, меню, ↑): часть объекта → объект целиком (дерево, персонаж),
+   * объект целиком → группа, в которую его сложил автор файла. null — больше расширять некуда
+   */
+  function groupOf(sel: ReadonlySet<number>): Set<number> | null {
+    if (!model || sel.size === 0) return null
+    if (objects) {
+      const whole = new Set([...new Set(Array.from(sel, (i) => objects.of[i]!))].flatMap((k) => objects.list[k]!.shapes))
+      if (whole.size > sel.size) return whole
+    }
+    return expandToParentGroup(model, sel)
+  }
+
   function expand() {
-    if (!model) return
-    const next = expandToParentGroup(model, selected)
+    const next = groupOf(selected)
     if (next) setSelected(next)
     else
       notify(
-        selected.size ? 'Выше только корневая обертка — добавьте фигуры рамкой' : 'Сначала выделите фигуру',
+        selected.size
+          ? 'Это уже вся группа: объект выделен целиком. Соседние фигуры можно добавить рамкой или Shift+кликом'
+          : 'Сначала выделите фигуру',
       )
   }
 
@@ -461,7 +475,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       items.push('separator')
     }
     const all = model.shapes.length
-    const expanded = selected.size ? expandToParentGroup(model, selected) : null
+    const expanded = groupOf(selected)
     items.push(
       { label: 'Выделить все', icon: 'selectAll', shortcut: mod('A'), disabled: selected.size === all, onSelect: selectAll },
       {
@@ -500,8 +514,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   }
 
   // Клавиатура режима выделения
-  const actions = useRef({ expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection, makeObject })
-  actions.current = { expand, selectAll, save, closeSource, selected, mode, selectObjectsOfSelection, makeObject }
+  const actions = useRef({ expand, selectAll, save, closeSource, selected, mode, makeObject })
+  actions.current = { expand, selectAll, save, closeSource, selected, mode, makeObject }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isDialogOpen()) return
@@ -510,9 +524,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       const a = actions.current
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        // Из элементов ↑ возвращает к объектам целиком, из объектов — к родительской группе исходника
-        if (a.mode === 'elements' && a.selected.size) a.selectObjectsOfSelection()
-        else a.expand()
+        // Как кнопка «Выделить всю группу»: часть объекта → объект целиком → группа из файла. Режим не меняется
+        a.expand()
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
         e.preventDefault()
         a.selectAll()

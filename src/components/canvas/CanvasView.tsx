@@ -6,7 +6,7 @@ import { notify } from '../../store/ui'
 import { Icon } from '../Icon'
 import { Button, Divider, IconButton } from '../ui'
 import { isTypingTarget } from '../../lib/dom'
-import { isDialogOpen } from '../../store/confirm'
+import { confirmDialog, isDialogOpen } from '../../store/confirm'
 import { LayersPanel } from './LayersPanel'
 import { Viewport } from './Viewport'
 
@@ -116,7 +116,7 @@ function SelectionInfo() {
       ? `${Math.round(obj.scale * 100)}%`
       : `${Math.round(obj.scale * 100)}×${Math.round(obj.scaleY * 100)}%`
   return (
-    <span className="hidden items-center gap-2 px-2 text-xs text-muted tabular-nums xl:flex" data-testid="selection-info">
+    <span className="hidden items-center gap-2 px-2 text-xs whitespace-nowrap text-muted tabular-nums xl:flex" data-testid="selection-info">
       <span>X {Math.round(obj.x)}</span>
       <span>Y {Math.round(obj.y)}</span>
       <span>{scale}</span>
@@ -126,11 +126,25 @@ function SelectionInfo() {
   )
 }
 
+/** Очистка холста: с подтверждением, но обратимо — это один шаг истории */
+async function clearCanvas(count: number) {
+  const ok = await confirmDialog({
+    title: 'Очистить холст?',
+    message: `С холста уберутся все объекты (${count}). Компоненты в библиотеке останутся. Вернуть можно через Ctrl+Z.`,
+    confirmText: 'Очистить',
+    danger: true,
+  })
+  if (!ok) return
+  useScene.getState().clearScene()
+  notify('Холст очищен. Вернуть — Ctrl+Z')
+}
+
 export function CanvasView() {
   useCanvasShortcuts()
   const canUndo = useScene((st) => st.past.length > 0)
   const canRedo = useScene((st) => st.future.length > 0)
   const hasSelection = useScene((st) => st.selectedId !== null)
+  const objectCount = useScene((st) => st.scene.objects.length)
   const s = useScene.getState()
   const order = (op: LayerOp) => () => s.reorderSelected(op)
 
@@ -153,7 +167,17 @@ export function CanvasView() {
         <IconButton icon="trash" label="Удалить" shortcut="Delete" onClick={s.removeSelected} disabled={!hasSelection} />
         <SelectionInfo />
         <div className="flex-1" />
-        <Button variant="primary" onClick={exportScene} data-testid="export">
+        <Button
+          variant="ghost"
+          onClick={() => void clearCanvas(objectCount)}
+          disabled={objectCount === 0}
+          title="Убрать с холста все объекты (компоненты в библиотеке останутся)"
+          className="whitespace-nowrap"
+          data-testid="clear-canvas"
+        >
+          <Icon name="eraser" /> Очистить холст
+        </Button>
+        <Button variant="primary" onClick={exportScene} className="whitespace-nowrap" data-testid="export">
           <Icon name="download" /> Скачать SVG
         </Button>
       </div>

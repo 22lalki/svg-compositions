@@ -643,6 +643,8 @@ check('undo после удаления компонента не возвращ
   const c3 = `${await count()} ${await mode()}`
   await page.keyboard.press('ArrowUp')
   const c4 = `${await count()} ${await mode()}`
+  // Режим переключает только пользователь
+  await page.click('[data-testid="mode-objects"]')
   await page.keyboard.down('Shift')
   await page.mouse.click(dog.x, dog.y)
   await page.keyboard.up('Shift')
@@ -650,7 +652,7 @@ check('undo после удаления компонента не возвращ
   check('клик — объект целиком (девушка 14 фигур)', c1 === '14 объекты', c1)
   check('двойной клик — одна фигура, режим элементов', c2 === '1 элементы', c2)
   check('в режиме элементов Shift+клик добавляет фигуру', c3 === '2 элементы', c3)
-  check('↑ возвращает к объекту целиком', c4 === '14 объекты', c4)
+  check('↑ выделяет объект целиком, режим не меняется', c4 === '14 элементы', c4)
   check('Shift+клик в режиме объектов добавляет второй объект (собака)', c5 === '18 объекты', c5)
 
   // Именованная разметка: подпись при наведении и имя компонента по умолчанию
@@ -935,6 +937,57 @@ check('undo после удаления компонента не возвращ
   )
   check('безопасность: в экспорте нет обработчиков, инструкций обработки и внешних ссылок', !/onerror|onclick|<\?(?!xml\s)|evil\.example|<img/i.test(exported))
   await clearCanvas()
+}
+
+// 14. «Выделить всю группу» из фигуры, очистка холста и библиотеки
+{
+  const count = async () => (await page.textContent('[data-testid="selection-count"]')).match(/\d+/)[0]
+  // 02: деревья в файле не сгруппированы — кнопка все равно выделяет дерево целиком
+  await openSource('02')
+  const crown = await srcToClient(450, 80)
+  await page.mouse.dblclick(crown.x, crown.y)
+  const one = await count()
+  const groupButton = page.getByRole('button', { name: 'Выделить всю группу' })
+  await groupButton.click()
+  const tree = await count()
+  await groupButton.click()
+  const hint = await page.locator('[role="status"]').last().textContent()
+  check('«Выделить всю группу»: фигура дерева → дерево целиком, дальше — понятная подсказка', one === '1' && tree === '4' && hint.includes('уже вся группа'), `${one} → ${tree}; ${hint}`)
+
+  // Очистка холста — один шаг истории
+  await backToCanvas()
+  await clearCanvas()
+  const firstCard = page.locator('[data-component-id]').first()
+  await firstCard.click()
+  await firstCard.click()
+  await page.click('[data-testid="clear-canvas"]')
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Очистить' }).click()
+  await wait(200)
+  const afterClear = await page.locator('[data-layer-id]').count()
+  await page.keyboard.press('Control+z')
+  await wait(200)
+  const afterUndo = await page.locator('[data-layer-id]').count()
+  check('«Очистить холст»: все объекты убраны, Ctrl+Z возвращает', afterClear === 0 && afterUndo === 2, `${afterClear} → ${afterUndo}`)
+
+  // Очистка библиотеки: выборочно галочками, затем «Все»
+  const cards = page.locator('[data-component-id]')
+  const before = await cards.count()
+  await page.click('[data-testid="library-clear"]')
+  await cards.nth(0).click()
+  await cards.nth(1).click()
+  const pickedText = await page.textContent('[data-testid="library-remove-picked"]')
+  await page.click('[data-testid="library-remove-picked"]')
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Удалить', exact: true }).click()
+  await wait(200)
+  const afterTwo = await cards.count()
+  await page.click('[data-testid="library-clear"]')
+  await page.getByLabel('Выбрать все', { exact: true }).check()
+  await page.click('[data-testid="library-remove-picked"]')
+  await page.locator('[role="dialog"]').getByRole('button', { name: 'Удалить', exact: true }).click()
+  await wait(200)
+  const afterAll = { cards: await cards.count(), layers: await page.locator('[data-layer-id]').count(), sections: await page.locator('section[data-library]').count() }
+  check('«Очистить» в библиотеке: галочками удалены 2 компонента', pickedText.includes('Удалить (2)') && afterTwo === before - 2, `${before} → ${afterTwo}`)
+  check('«Очистить» в библиотеке: «Все» удаляет все компоненты и их объекты с холста', afterAll.cards === 0 && afterAll.layers === 0 && afterAll.sections >= 1, JSON.stringify(afterAll))
 }
 
 for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check', '_security-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })

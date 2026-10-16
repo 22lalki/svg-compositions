@@ -18,6 +18,8 @@ type LibraryState = {
   add: (c: Component) => void
   rename: (id: string, name: string) => void
   remove: (id: string) => void
+  /** Удаление нескольких компонентов разом (одна запись в IndexedDB) */
+  removeMany: (ids: string[]) => void
   moveComponent: (id: string, libraryId: string | null) => void
   createLibrary: (name?: string) => Library
   renameLibrary: (id: string, name: string) => void
@@ -79,6 +81,12 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
   },
   remove: (id) => {
     const components = get().components.filter((c) => c.id !== id)
+    set({ components })
+    persist(components)
+  },
+  removeMany: (ids) => {
+    const gone = new Set(ids)
+    const components = get().components.filter((c) => !gone.has(c.id))
     set({ components })
     persist(components)
   },

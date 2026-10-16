@@ -35,6 +35,8 @@ type SceneState = {
   reorderSelected: (op: LayerOp) => void
   moveLayer: (id: string, targetId: string, position: 'above' | 'below') => void
   setArtboard: (width: number, height: number) => void
+  /** Убрать с холста все объекты — один шаг истории (Ctrl+Z вернет) */
+  clearScene: () => void
   /** Удаление компонента из библиотеки: убрать его экземпляры из сцены и из всей истории */
   purgeComponent: (componentId: string) => void
 }
@@ -187,6 +189,12 @@ export const useScene = create<SceneState>()((set, get) => ({
       rest.splice(position === 'above' ? t + 1 : t, 0, obj)
       return rest.every((o, i) => o === s.objects[i]) ? s : { ...s, objects: rest }
     })
+  },
+
+  clearScene: () => {
+    if (get().gestureBase) return
+    get().commit((s) => (s.objects.length ? { ...s, objects: [] } : s))
+    set({ selectedId: null })
   },
 
   setArtboard: (width, height) =>
