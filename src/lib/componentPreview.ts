@@ -1,4 +1,5 @@
 import type { Component } from '../types'
+import { cleanMarkup } from './markup'
 import { standaloneSvg, svgDataUrl } from './svg'
 
 /** MIME для перетаскивания карточки библиотеки на холст */
@@ -10,7 +11,7 @@ const previewCache = new WeakMap<Component, string>()
 export function componentPreview(c: Component): string {
   let url = previewCache.get(c)
   if (!url) {
-    url = svgDataUrl(standaloneSvg(c))
+    url = svgDataUrl(standaloneSvg({ ...c, defs: cleanMarkup(c.defs), markup: cleanMarkup(c.markup) }))
     previewCache.set(c, url)
   }
   return url

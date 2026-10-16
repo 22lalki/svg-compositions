@@ -5,8 +5,7 @@ const serializer = typeof XMLSerializer !== 'undefined' ? new XMLSerializer() : 
 
 /**
  * XML-разметка узла без объявлений пространств имен:
- * они ставятся один раз на корневой <svg> (превью, экспорт),
- * а при вставке через innerHTML внутрь <svg> парсер HTML назначает их сам.
+ * они ставятся один раз на корневой <svg> (превью, экспорт, разбор в lib/markup.ts).
  */
 export function serializeFragment(node: Element): string {
   if (!serializer) throw new Error('XMLSerializer недоступен')

@@ -2,72 +2,154 @@ import { listShapes, NON_RENDERED } from './extract'
 import { normalizeUrlRefs, SVG_NS, XLINK_NS } from './svg'
 
 export const MAX_SVG_BYTES = 5 * 1024 * 1024
+/** Предел элементов после раскрытия <use>: маленький файл с вложенными <use> иначе разрастается до миллионов узлов */
+export const MAX_SVG_ELEMENTS = 60_000
+/** Предел фигур: дальше разбор и выделение объектов заметно подвешивают вкладку */
+export const MAX_SVG_SHAPES = 5_000
+
+const tooComplex = (what: string) => new SvgImportError(`слишком сложный файл: ${what}`)
 
 /** Ошибка с текстом для пользователя */
 export class SvgImportError extends Error {}
 
 /* ---------- Очистка: файл будет вставлен в страницу инлайном ---------- */
 
-const FORBIDDEN = new Set([
-  'script',
-  'foreignobject',
-  'iframe',
-  'object',
-  'embed',
-  'audio',
-  'video',
-  'canvas',
-  'animate',
-  'animatemotion',
-  'animatetransform',
-  'animatecolor',
-  'set',
-  'discard',
-  'handler',
-  'listener',
+/**
+ * Разрешенные элементы SVG. Все прочие — включая элементы из чужих пространств имен (XHTML внутри SVG),
+ * скрипты, анимации (умеют подменять ссылки), foreignObject, feImage — удаляются вместе с содержимым.
+ * Белый список надежнее черного: неизвестное по умолчанию запрещено
+ */
+const ALLOWED_ELEMENTS = new Set([
+  'svg', 'g', 'defs', 'symbol', 'use', 'a', 'style', 'title', 'desc',
+  'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'image',
+  'text', 'tspan', 'textPath',
+  'linearGradient', 'radialGradient', 'stop', 'pattern', 'clipPath', 'mask', 'marker',
+  'filter', 'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite', 'feConvolveMatrix',
+  'feDiffuseLighting', 'feDisplacementMap', 'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB',
+  'feFuncG', 'feFuncR', 'feGaussianBlur', 'feMerge', 'feMergeNode', 'feMorphology', 'feOffset', 'fePointLight',
+  'feSpecularLighting', 'feSpotLight', 'feTile', 'feTurbulence',
 ])
 
+const XML_NS = 'http://www.w3.org/XML/1998/namespace'
+const XMLNS_NS = 'http://www.w3.org/2000/xmlns/'
 const RASTER_DATA_URL = /^\s*data:image\/(png|jpe?g|gif|webp);/i
+/** CSS-функции, которые загружают ресурс не через url(): image-set("…"), cross-fade(), element(), src() */
+const LOADING_FUNCTIONS = /(?:image-set|image|cross-fade|element|src)\s*\(/i
 
-/** url(...) наружу (не #id) заменяем на none: никаких внешних запросов из чужого файла */
-const stripExternalUrls = (value: string) =>
-  value.replace(/url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi, (whole, _q: string, target: string) =>
-    target.trim().startsWith('#') ? whole : 'none',
-  )
+/** Все url(...) в значении ведут внутрь файла (#id). Разбор терпим к кавычкам и скобкам внутри них */
+function onlyInternalUrls(value: string): boolean {
+  const re = /url\s*\(/gi
+  for (let m = re.exec(value); m; m = re.exec(value)) {
+    let i = m.index + m[0].length
+    while (/\s/.test(value[i] ?? '')) i++
+    const quote = value[i] === '"' || value[i] === "'" ? value[i]! : null
+    const end = quote ? value.indexOf(quote, i + 1) : value.indexOf(')', i)
+    if (end < 0) return false
+    const target = value.slice(quote ? i + 1 : i, end).trim()
+    if (!target.startsWith('#')) return false
+    re.lastIndex = end + 1
+  }
+  return true
+}
+
+/** Значение не выполняет код и не ходит в сеть */
+function safeValue(value: string): boolean {
+  if (/(?:java|vb)script:/i.test(value.replace(/[\s\u0000-\u001f]+/g, ''))) return false
+  // Экранирование в CSS (u\rl(…)) прячет функции от проверки — такие значения не нужны рисунку
+  if (value.includes('\\')) return false
+  return onlyInternalUrls(value) && !LOADING_FUNCTIONS.test(value)
+}
+
+/** Объявления CSS (style="…" или правило таблицы) без внешних ресурсов. Значения уже разобраны браузером */
+function cleanDeclarations(style: CSSStyleDeclaration) {
+  for (let k = style.length - 1; k >= 0; k--) {
+    const prop = style.item(k)
+    if (!safeValue(style.getPropertyValue(prop))) style.removeProperty(prop)
+  }
+}
 
 /**
- * Удаляет все, что может выполнить код или сходить в сеть: скрипты, обработчики,
- * анимации (умеют подменять href), внешние ссылки и @import. Ссылки внутри файла (#id) остаются.
+ * Таблица стилей → только правила с безопасными объявлениями (и они же внутри @media).
+ * @import, @font-face, @namespace, @keyframes и прочие at-правила отбрасываются.
+ * Разбирает браузер (CSSStyleSheet без подключения к странице), регулярные выражения не нужны
  */
-export function sanitizeSvg(root: Element) {
-  for (const el of Array.from(root.querySelectorAll('*'))) {
-    if (FORBIDDEN.has(el.localName.toLowerCase())) el.remove()
+function cleanStylesheet(text: string): string {
+  let sheet: CSSStyleSheet
+  try {
+    sheet = new CSSStyleSheet()
+    sheet.replaceSync(text)
+  } catch {
+    return '' // браузер без конструируемых таблиц стилей: безопаснее не переносить стили вовсе
+  }
+  const rules = (list: CSSRuleList): string[] =>
+    Array.from(list).flatMap((rule) => {
+      if (rule instanceof CSSStyleRule) {
+        if (rule.cssRules?.length) return [] // вложенные правила (CSS nesting) не разбираем
+        cleanDeclarations(rule.style)
+        return rule.style.length ? [rule.cssText] : []
+      }
+      if (rule instanceof CSSMediaRule) {
+        const inner = rules(rule.cssRules)
+        return inner.length ? [`@media ${rule.media.mediaText} { ${inner.join(' ')} }`] : []
+      }
+      return []
+    })
+  return rules(sheet.cssRules).join('\n')
+}
+
+/**
+ * Очистка чужого SVG перед вставкой в страницу: остаются только разрешенные элементы SVG, текст и безопасные
+ * атрибуты. Комментарии и инструкции обработки удаляются: при разборе как HTML они превращаются в элементы.
+ * Обработчики on*, javascript:, внешние href и url(...) удаляются. Ссылки внутри файла (#id) остаются.
+ * keepStyles: false — заодно удалить <style> (разметка компонентов, где стилей уже нет)
+ */
+export function sanitizeSvg(root: Element, { keepStyles = true } = {}) {
+  const doc = root.ownerDocument
+  // Обход без рекурсии: глубокая вложенность не переполнит стек
+  const stack: Element[] = [root]
+  while (stack.length) {
+    const el = stack.pop()!
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const c = child as Element
+        if (c.namespaceURI !== SVG_NS || !ALLOWED_ELEMENTS.has(c.localName) || (c.localName === 'style' && !keepStyles)) c.remove()
+        else stack.push(c)
+      } else if (child.nodeType === Node.CDATA_SECTION_NODE) {
+        child.replaceWith(doc.createTextNode((child as CDATASection).data))
+      } else if (child.nodeType !== Node.TEXT_NODE) {
+        child.remove() // комментарии, инструкции обработки
+      }
+    }
+  }
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    for (const attr of Array.from(el.attributes)) {
+      const ns = attr.namespaceURI
+      const name = attr.localName
+      if (ns === XMLNS_NS) continue // объявления пространств имен
+      const known = ns === null || (ns === XLINK_NS && name === 'href') || (ns === XML_NS && (name === 'space' || name === 'lang'))
+      if (!known || /^on/i.test(name)) {
+        el.removeAttributeNode(attr)
+      } else if (name === 'href') {
+        const internal = attr.value.trim().startsWith('#')
+        if (!internal && !(el.localName === 'image' && RASTER_DATA_URL.test(attr.value))) el.removeAttributeNode(attr)
+      } else if (name === 'style' && el instanceof SVGElement) {
+        cleanDeclarations(el.style)
+        if (!el.style.length) el.removeAttribute('style')
+      } else if (!safeValue(attr.value)) {
+        el.removeAttributeNode(attr)
+      }
+    }
   }
   // <a> разворачиваем в <g>: ссылка не нужна, содержимое нужно
   for (const a of Array.from(root.querySelectorAll('a'))) {
-    const g = root.ownerDocument.createElementNS(SVG_NS, 'g')
+    const g = doc.createElementNS(SVG_NS, 'g')
     for (const attr of Array.from(a.attributes)) {
-      if (attr.localName !== 'href' && attr.localName !== 'target') g.setAttribute(attr.name, attr.value)
+      if (attr.localName !== 'href' && attr.localName !== 'target') g.setAttributeNS(attr.namespaceURI, attr.name, attr.value)
     }
     g.append(...Array.from(a.childNodes))
     a.replaceWith(g)
   }
-  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
-    for (const attr of Array.from(el.attributes)) {
-      const value = attr.value
-      if (/^on/i.test(attr.localName) || /javascript:/i.test(value)) {
-        el.removeAttributeNode(attr)
-      } else if (attr.localName === 'href') {
-        const internal = value.trim().startsWith('#')
-        if (!internal && !(el.localName === 'image' && RASTER_DATA_URL.test(value))) el.removeAttributeNode(attr)
-      } else if (value.includes('url(')) {
-        attr.value = stripExternalUrls(value)
-      }
-    }
-  }
-  for (const style of Array.from(root.querySelectorAll('style'))) {
-    style.textContent = stripExternalUrls((style.textContent ?? '').replace(/@import[^;]*;?/gi, ''))
-  }
+  for (const style of Array.from(root.querySelectorAll('style'))) style.textContent = cleanStylesheet(style.textContent ?? '')
 }
 
 /* ---------- Нормализация: к виду, на который рассчитано извлечение ---------- */
@@ -135,11 +217,14 @@ const num = (v: string | null, fallback = 0) => {
 
 type ViewBox = { x: number; y: number; w: number; h: number }
 
+/** Разумный размер: браузер сам отвергает viewBox вроде 1e39 или 1e-50, и рисунок схлопывается */
+const sane = (n: number) => n >= 1e-3 && n <= 1e7
+
 function parseViewBox(el: Element): ViewBox | null {
   const parts = (el.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n) || Math.abs(n) > 1e7)) return null
   const [x, y, w, h] = parts as [number, number, number, number]
-  return w > 0 && h > 0 ? { x, y, w, h } : null
+  return sane(w) && sane(h) ? { x, y, w, h } : null
 }
 
 /** Вписывание viewBox в окно w×h (preserveAspectRatio по умолчанию: xMidYMid meet) */
@@ -165,6 +250,7 @@ function copyPresentation(from: Element, to: Element) {
  */
 function expandUses(svg: SVGSVGElement) {
   const doc = svg.ownerDocument
+  let elements = svg.getElementsByTagName('*').length
   for (let pass = 0; pass < 8; pass++) {
     const uses = Array.from(svg.querySelectorAll('use')).filter((u) => !u.closest(NON_RENDERED))
     if (uses.length === 0) return
@@ -197,6 +283,8 @@ function expandUses(svg: SVGSVGElement) {
       const transform = parts.join(' ').trim()
       if (transform) g.setAttribute('transform', transform)
       g.appendChild(content)
+      elements += content.getElementsByTagName('*').length + 1
+      if (elements > MAX_SVG_ELEMENTS) throw tooComplex(`больше ${MAX_SVG_ELEMENTS} элементов после раскрытия <use>`)
       use.replaceWith(g)
     }
   }
@@ -232,11 +320,11 @@ function ensureViewBox(svg: SVGSVGElement) {
   if (!vb) {
     const w = ABSOLUTE_LENGTH.exec(svg.getAttribute('width') ?? '')?.[1]
     const h = ABSOLUTE_LENGTH.exec(svg.getAttribute('height') ?? '')?.[1]
-    if (w && h && Number(w) > 0 && Number(h) > 0) {
+    if (w && h && sane(Number(w)) && sane(Number(h))) {
       vb = { x: 0, y: 0, w: Number(w), h: Number(h) }
     } else {
       const b = svg.getBBox()
-      if (!(b.width > 0 && b.height > 0)) throw new SvgImportError('не удалось определить размеры рисунка')
+      if (!(sane(b.width) && sane(b.height))) throw new SvgImportError('не удалось определить размеры рисунка')
       vb = { x: b.x, y: b.y, w: b.width, h: b.height }
     }
     svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`)
@@ -257,6 +345,7 @@ export function prepareSvgText(text: string): { svgText: string; shapeCount: num
   if (doc.querySelector('parsererror') || parsed.localName !== 'svg' || parsed.namespaceURI !== SVG_NS) {
     throw new SvgImportError('файл не является корректным SVG')
   }
+  if (parsed.getElementsByTagName('*').length > MAX_SVG_ELEMENTS) throw tooComplex(`больше ${MAX_SVG_ELEMENTS} элементов`)
   sanitizeSvg(parsed)
   const svg = document.importNode(parsed, true) as unknown as SVGSVGElement
   const host = document.createElement('div')
@@ -271,6 +360,7 @@ export function prepareSvgText(text: string): { svgText: string; shapeCount: num
     ensureViewBox(svg)
     const shapeCount = listShapes(svg).length
     if (shapeCount === 0) throw new SvgImportError('в файле нет векторных фигур (path, rect, circle…)')
+    if (shapeCount > MAX_SVG_SHAPES) throw tooComplex(`${shapeCount} фигур, допустимо до ${MAX_SVG_SHAPES}`)
     return { svgText: new XMLSerializer().serializeToString(svg), shapeCount }
   } finally {
     host.remove()

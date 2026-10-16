@@ -7,12 +7,15 @@
  *
  * Плюс «чужие» SVG из ./fixtures (стили-классы, <use>/<symbol>, вложенные <svg>, без размеров, Illustrator):
  * нормализация при загрузке не должна менять вид, а извлечение из нормализованного файла — совпадать с ним.
- * malicious.svg проверяет очистку: ни скриптов, ни обработчиков, ни внешних ссылок.
+ * malicious.svg проверяет очистку: ни скриптов, ни обработчиков, ни внешних ссылок — ни в файле, ни на холсте
+ * (компонент из него вставляется так же, как в Viewport), ни из старого компонента с опасной разметкой.
+ * «Бомба» из вложенных <use> должна отклоняться быстро, а не вешать вкладку.
  */
 import type { SourceMeta } from '../types'
 import { analyzeSource, extractComponent, isAxisAlignedShape, listShapes, type SourceModel } from '../lib/extract'
 import { svgDataUrl, SVG_NS } from '../lib/svg'
-import { prepareSvgText } from '../lib/importSvg'
+import { prepareSvgText, SvgImportError } from '../lib/importSvg'
+import { svgNodes } from '../lib/markup'
 
 const FIXTURES = import.meta.glob('./fixtures/*.svg', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
@@ -205,13 +208,45 @@ const row = (source: string, mode: string, diffPixels: number, painted: number):
 async function verifyFixture(name: string, text: string, host: HTMLElement): Promise<CaseResult[]> {
   const source = `fx:${name}`
   if (name === 'malicious') {
-    const { svgText } = prepareSvgText(text)
-    const banned = ['<script', 'onload', 'onclick', 'javascript:', 'evil.example', 'foreignobject', '<set', '@import']
-    const found = banned.filter((b) => svgText.toLowerCase().includes(b))
     const w = window as unknown as { __pwned?: number }
-    host.replaceChildren(parseSvg(svgText))
-    await new Promise((r) => setTimeout(r, 50))
-    return [row(source, 'sanitize', found.length + (w.__pwned ? 1 : 0), 1)]
+    const { svgText } = prepareSvgText(text)
+    const banned = ['<script', 'onload', 'onclick', 'onerror', 'javascript:', 'evil.example', 'foreignobject', '<set', '@import', '@font-face', 'image-set', '<?', '<img', 'xhtml', '<!--']
+    const found = banned.filter((b) => svgText.toLowerCase().includes(b))
+    const svg = parseSvg(svgText)
+    host.replaceChildren(svg)
+    // Компонент из всех фигур — на «холст» тем же путем, что в Viewport
+    const model = analyzeSource(svg, { id: source, title: name, originalName: 'malicious.svg', kind: 'user' })
+    const ext = extractComponent(model, new Set(model.shapes.map((x) => x.index)), 'cM-')
+    const canvas = document.createElementNS(SVG_NS, 'svg')
+    const defs = document.createElementNS(SVG_NS, 'defs')
+    const g = document.createElementNS(SVG_NS, 'g')
+    defs.replaceChildren(...svgNodes(ext?.defs ?? ''))
+    g.replaceChildren(...svgNodes(ext?.markup ?? ''))
+    // Старый компонент из IndexedDB, сохраненный до нынешней очистки
+    const legacy = document.createElementNS(SVG_NS, 'g')
+    legacy.replaceChildren(...svgNodes('<path d="M0 0h9v9z"><?x y><img src=x onerror="window.__pwned=8">?></path>'))
+    canvas.append(defs, g, legacy)
+    host.append(canvas)
+    await new Promise((r) => setTimeout(r, 150))
+    const foreign = Array.from(canvas.querySelectorAll('*')).filter((el) => el.namespaceURI !== SVG_NS).length
+    const visible = model.shapes.length
+    // Бомба: 8 уровней символов по 10 ссылок на предыдущий — 10^8 копий без ограничения
+    let bomb = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><symbol id="s0"><rect width="1" height="1"/></symbol>'
+    for (let k = 1; k <= 8; k++) bomb += `<symbol id="s${k}">${'<use href="#s' + (k - 1) + '"/>'.repeat(10)}</symbol>`
+    bomb += '</defs><use href="#s8"/></svg>'
+    const t0 = performance.now()
+    let rejected = false
+    try {
+      prepareSvgText(bomb)
+    } catch (e) {
+      rejected = e instanceof SvgImportError
+    }
+    const slow = performance.now() - t0 > 3000
+    return [
+      row(source, 'sanitize', found.length + (w.__pwned ? 1 : 0), 1),
+      row(source, 'canvas', foreign + (w.__pwned ? 1 : 0) + (visible < 6 ? 1 : 0), 1),
+      row('fx:use-bomb', 'rejected', (rejected ? 0 : 1) + (slow ? 1 : 0), 1),
+    ]
   }
   const { svgText } = prepareSvgText(text)
   const normalized = parseSvg(svgText)

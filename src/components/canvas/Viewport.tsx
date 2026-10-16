@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
 import { isTypingTarget } from '../../lib/dom'
 import { COMPONENT_MIME } from '../../lib/componentPreview'
+import { svgNodes } from '../../lib/markup'
 import { Icon } from '../Icon'
 import { closeContextMenu, openContextMenu } from '../../store/contextMenu'
 import { objectMenuItems } from './objectMenu'
@@ -330,7 +332,7 @@ export function Viewport() {
           onPointerDown={onPointerDown}
           onContextMenu={onContextMenu}
         >
-          <defs dangerouslySetInnerHTML={{ __html: defs }} />
+          <SvgMarkup markup={defs} defs />
           <rect
             data-artboard=""
             width={scene.width}
@@ -407,14 +409,21 @@ const ObjectView = memo(function ObjectView({
 }) {
   return (
     <g data-obj-id={obj.id} transform={objectTransform(obj, comp)} style={{ cursor: interactive ? 'move' : undefined }}>
-      <Markup html={comp.markup} />
+      <SvgMarkup markup={comp.markup} />
     </g>
   )
 })
 
-/** Разметка компонента парсится один раз и не трогается при перемещении */
-const Markup = memo(function Markup({ html }: { html: string }) {
-  return <g dangerouslySetInnerHTML={{ __html: html }} />
+/**
+ * Разметка компонента вставляется готовыми узлами SVG (разбор XML + очистка, см. lib/markup.ts), а не через
+ * innerHTML. Пересобирается только при смене разметки, не при перемещении
+ */
+const SvgMarkup = memo(function SvgMarkup({ markup, defs = false }: { markup: string; defs?: boolean }) {
+  const ref = useRef<SVGGElement & SVGDefsElement>(null)
+  useLayoutEffect(() => {
+    ref.current?.replaceChildren(...svgNodes(markup))
+  }, [markup])
+  return defs ? <defs ref={ref} /> : <g ref={ref} />
 })
 
 const CORNERS: Array<[number, number]> = [

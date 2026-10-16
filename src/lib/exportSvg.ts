@@ -1,5 +1,6 @@
 import type { Component, Scene } from '../types'
 import { fmt } from './matrix'
+import { cleanMarkup } from './markup'
 import { escapeXml, SVG_NS, XLINK_NS } from './svg'
 import { objectTransform } from './transform'
 
@@ -19,7 +20,7 @@ export function sharedDefs(scene: Scene, components: ReadonlyMap<string, Compone
 export function buildExportSvg(scene: Scene, components: ReadonlyMap<string, Component>): string {
   const w = fmt(scene.width)
   const h = fmt(scene.height)
-  const defs = sharedDefs(scene, components)
+  const defs = cleanMarkup(sharedDefs(scene, components))
   const lines = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="${SVG_NS}" xmlns:xlink="${XLINK_NS}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
@@ -31,7 +32,7 @@ export function buildExportSvg(scene: Scene, components: ReadonlyMap<string, Com
     if (!c) continue
     lines.push(
       `  <g id="obj-${o.id}" data-component="${escapeXml(c.id)}" data-name="${escapeXml(c.name)}" ` +
-        `transform="${objectTransform(o, c)}">${c.markup}</g>`,
+        `transform="${objectTransform(o, c)}">${cleanMarkup(c.markup)}</g>`,
     )
   }
   lines.push(`</svg>`, ``)

@@ -935,7 +935,43 @@ check('undo после удаления компонента не возвращ
   )
 }
 
-for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
+// 11. Безопасность: вредоносный SVG → компонент → настоящий холст и экспорт
+{
+  const errorsBefore = errors.length
+  await page.setInputFiles('[data-testid="upload-input"]', [path.join(ROOT, 'src', 'dev', 'fixtures', 'malicious.svg')])
+  const card = page.locator('[data-testid="user-sources"] [data-source-id]', { hasText: 'malicious' })
+  await card.waitFor()
+  // Со сборкой под CSP (vite preview) браузер сообщает о заблокированных on*-атрибутах уже при разборе файла,
+  // до очистки: ничего не выполняется, это след сработавшей защиты, а не ошибка приложения
+  const cspReports = errors.splice(errorsBefore).filter((e) => {
+    if (/Content Security Policy/.test(e)) return true
+    errors.push(e)
+    return false
+  })
+  if (cspReports.length) console.log(`CSP заблокировала обработчиков при разборе вредного файла: ${cspReports.length}`)
+  await openSource(await card.getAttribute('data-source-id'))
+  await page.keyboard.press('Control+a')
+  await saveComponent('Вредный файл')
+  await backToCanvas()
+  await clearCanvas()
+  await dropComponent('Вредный файл', 600, 400)
+  await wait(400)
+  const state = await page.evaluate(() => ({
+    pwned: window.__pwned ?? null,
+    foreign: Array.from(document.querySelectorAll('[data-testid="canvas"] svg *')).filter((el) => el.namespaceURI !== 'http://www.w3.org/2000/svg').length,
+    shapes: document.querySelectorAll('[data-testid="canvas"] [data-obj-id] rect, [data-testid="canvas"] [data-obj-id] circle').length,
+  }))
+  const exported = await exportSvg('_security-check')
+  check(
+    'безопасность: вредоносный SVG на холсте — фигуры есть, скриптов и HTML-элементов нет',
+    state.pwned === null && state.foreign === 0 && state.shapes >= 6,
+    JSON.stringify(state),
+  )
+  check('безопасность: в экспорте нет обработчиков, инструкций обработки и внешних ссылок', !/onerror|onclick|<\?(?!xml\s)|evil\.example|<img/i.test(exported))
+  await clearCanvas()
+}
+
+for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check', '_security-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
 writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
 check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 5, `навигаций: ${navigations}`)

@@ -1,8 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 200 200" onload="window.__pwned=1">
   <script>window.__pwned = 2</script>
-  <style>@import url(https://evil.example/x.css); .a{fill:url(https://evil.example/p.svg#g)}</style>
-  <a href="javascript:window.__pwned=3"><rect class="a" width="100" height="100" fill="#6c63ff" onclick="window.__pwned=4"/></a>
+  <style>@import url(https://evil.example/x.css); @font-face { font-family: x; src: url(https://evil.example/f.woff) } .a{fill:url(https://evil.example/p.svg#g)} .b{fill:#6c63ff;mask-image:image-set("https://evil.example/m.png" 1x)}</style>
+  <!-- комментарий --><![CDATA[ текст ]]>
+  <defs>
+    <linearGradient id="g"><stop offset="0" stop-color="#6c63ff"/><?x y><img src=x onerror="window.__pwned=7">?></linearGradient>
+  </defs>
+  <a href="javascript:window.__pwned=3"><rect class="a b" width="100" height="100" fill="#6c63ff" onclick="window.__pwned=4"/></a>
   <image href="https://evil.example/track.png" width="10" height="10"/>
   <foreignObject width="100" height="100"><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>
   <circle cx="150" cy="150" r="40" fill="#ff6584"><set attributeName="fill" to="red" begin="0s"/></circle>
+  <!-- инструкция обработки внутри фигуры: парсер HTML превратил бы ее в живой <img> -->
+  <rect x="110" y="10" width="40" height="40" fill="url(#g)"><?x y><img src=x onerror="window.__pwned=5">?></rect>
+  <!-- HTML-элементы внутри SVG: свой и чужого пространства имен -->
+  <rect x="10" y="110" width="40" height="40" fill="#ff6584"><img xmlns="http://www.w3.org/1999/xhtml" src="https://evil.example/xhtml.png"/></rect>
+  <img src="https://evil.example/svg-img.png"/>
+  <!-- обходы фильтра url(): регистр, скобка в кавычках, экранирование, image-set -->
+  <rect x="60" y="110" width="20" height="20" fill="URL(https://evil.example/upper.svg#a)"/>
+  <rect x="90" y="110" width="20" height="20" style="fill: url('https://evil.example/paren).svg#a')"/>
+  <rect x="120" y="110" width="20" height="20" style="fill: u\rl(https://evil.example/escape.svg#a)"/>
+  <rect x="150" y="110" width="20" height="20" style="fill: #6c63ff; cursor: image-set('https://evil.example/c.png' 1x), auto"/>
 </svg>
