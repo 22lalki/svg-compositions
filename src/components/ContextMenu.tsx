@@ -1,46 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { create } from 'zustand'
-import { Icon, type IconName } from './Icon'
-
-export type MenuItem =
-  | {
-      label: string
-      icon?: IconName
-      shortcut?: string
-      danger?: boolean
-      disabled?: boolean
-      onSelect: () => void
-    }
-  | 'separator'
-
-type MenuState = { x: number; y: number; items: MenuItem[]; onClose?: () => void } | null
-
-const useMenuStore = create<{ menu: MenuState }>()(() => ({ menu: null }))
-
-/** Открыть контекстное меню в точке курсора (координаты окна); onClose — при любом закрытии */
-export function openContextMenu(x: number, y: number, items: MenuItem[], opts: { onClose?: () => void } = {}) {
-  closeContextMenu()
-  useMenuStore.setState({ menu: { x, y, items, onClose: opts.onClose } })
-}
-
-export function closeContextMenu() {
-  const { menu } = useMenuStore.getState()
-  if (!menu) return
-  useMenuStore.setState({ menu: null })
-  menu.onClose?.()
-}
-export const isContextMenuOpen = () => useMenuStore.getState().menu !== null
-
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-/** Подпись сочетания с учетом платформы: mod('D') → Ctrl+D / ⌘D */
-export const mod = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`)
+import { closeContextMenu, useContextMenu } from '../store/contextMenu'
+import { Icon } from './Icon'
 
 const GAP = 4
 /** Чуть в стороне от курсора: пункт под ним не подсвечивается сам, пока мышь не сдвинется */
 const OFFSET = 2
 
 export function ContextMenuHost() {
-  const menu = useMenuStore((s) => s.menu)
+  const menu = useContextMenu((s) => s.menu)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 

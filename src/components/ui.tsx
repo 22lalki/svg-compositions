@@ -1,8 +1,8 @@
 import type { ComponentProps, ReactNode } from 'react'
-import { create } from 'zustand'
 import { useEffect, useRef } from 'react'
 import { Icon, type IconName } from './Icon'
 import { useUi } from '../store/ui'
+import { resolveConfirm, useConfirm } from '../store/confirm'
 
 /** Кнопка-иконка с подсказкой */
 export function IconButton({
@@ -52,39 +52,22 @@ export const Divider = () => <div className="mx-1 h-5 w-px bg-line" />
 
 /* ---------- Подтверждение ---------- */
 
-type ConfirmRequest = {
-  title: string
-  message: string
-  confirmText: string
-  danger?: boolean
-  resolve: (ok: boolean) => void
-}
-
-const useConfirmStore = create<{ request: ConfirmRequest | null }>()(() => ({ request: null }))
-
-export function confirmDialog(opts: Omit<ConfirmRequest, 'resolve'>): Promise<boolean> {
-  return new Promise((resolve) => useConfirmStore.setState({ request: { ...opts, resolve } }))
-}
-
 export function ConfirmHost() {
-  const request = useConfirmStore((s) => s.request)
+  const request = useConfirm((s) => s.request)
   const confirmRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!request) return
     confirmRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close(false)
+      if (e.key === 'Escape') resolveConfirm(false)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [request])
 
   if (!request) return null
-  function close(ok: boolean) {
-    request?.resolve(ok)
-    useConfirmStore.setState({ request: null })
-  }
+  const close = resolveConfirm
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onPointerDown={() => close(false)}>
       <div
@@ -124,10 +107,3 @@ export function Toasts() {
     </div>
   )
 }
-
-export function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
-}
-
-export const isDialogOpen = () => useConfirmStore.getState().request !== null

@@ -14,10 +14,10 @@ import { sharedDefs } from '../../lib/exportSvg'
 import { framePoint, normalizeAngle, objectFrame, objectTransform, rotateVec } from '../../lib/transform'
 import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
-import { isTypingTarget } from '../ui'
-import { COMPONENT_MIME } from '../LibraryPanel'
+import { isTypingTarget } from '../../lib/dom'
+import { COMPONENT_MIME } from '../../lib/componentPreview'
 import { Icon } from '../Icon'
-import { closeContextMenu, openContextMenu } from '../ContextMenu'
+import { closeContextMenu, openContextMenu } from '../../store/contextMenu'
 import { objectMenuItems } from './objectMenu'
 
 type View = { zoom: number; cx: number; cy: number }

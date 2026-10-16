@@ -30,3 +30,7 @@ export function notify(text: string, kind: Toast['kind'] = 'info') {
 }
 
 export const sourceLabel = (s: SourceMeta | undefined) => (s ? `${s.id} ${s.title}` : 'неизвестный исходник')
+
+// Хранилище с логикой нельзя подменить «на лету»: при его правке в dev перезагружаем страницу
+// (сцена и библиотека в IndexedDB, ничего не теряется), иначе модули разъедутся по разным экземплярам
+if (import.meta.hot) import.meta.hot.accept(() => location.reload())

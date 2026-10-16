@@ -68,9 +68,10 @@ src/
   lib/storage.ts         IndexedDB (idb-keyval)
   store/scene.ts         сцена, выделение, история undo/redo (Zustand)
   store/library.ts       библиотека компонентов
+  store/contextMenu.ts, store/confirm.ts  меню и окно подтверждения; экземпляр переживает горячие обновления Vite
   components/extract/    режим выделения
   components/canvas/     холст, ручки, панель слоев, тулбар
-  components/ContextMenu.tsx  контекстное меню у курсора
+  components/ContextMenu.tsx  контекстное меню у курсора (состояние — store/contextMenu.ts)
 scripts/verify-extraction.mjs   самопроверка извлечения (70 случаев)
 scripts/demo.mjs                сквозной сценарий через UI, примеры, проверки чек-листа, запись видео
 ```

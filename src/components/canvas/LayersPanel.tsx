@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
-import { componentPreview } from '../LibraryPanel'
+import { componentPreview } from '../../lib/componentPreview'
 import { Icon } from '../Icon'
-import { openContextMenu } from '../ContextMenu'
+import { openContextMenu } from '../../store/contextMenu'
 import { objectMenuItems } from './objectMenu'
 
 const LAYER_MIME = 'application/x-scene-layer'

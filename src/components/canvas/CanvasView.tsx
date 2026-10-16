@@ -4,11 +4,13 @@ import { componentMap, useLibrary } from '../../store/library'
 import { useScene, type LayerOp } from '../../store/scene'
 import { notify } from '../../store/ui'
 import { Icon } from '../Icon'
-import { Button, Divider, IconButton, isDialogOpen, isTypingTarget } from '../ui'
+import { Button, Divider, IconButton } from '../ui'
+import { isTypingTarget } from '../../lib/dom'
+import { isDialogOpen } from '../../store/confirm'
 import { LayersPanel } from './LayersPanel'
 import { Viewport } from './Viewport'
 
-export function exportScene() {
+function exportScene() {
   const { scene } = useScene.getState()
   if (scene.objects.length === 0) {
     notify('Холст пуст — нечего экспортировать')

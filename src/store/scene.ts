@@ -208,3 +208,7 @@ export const useScene = create<SceneState>()((set, get) => ({
     })
   },
 }))
+
+// Хранилище с логикой нельзя подменить «на лету»: при его правке в dev перезагружаем страницу
+// (сцена и библиотека в IndexedDB, ничего не теряется), иначе модули разъедутся по разным экземплярам
+if (import.meta.hot) import.meta.hot.accept(() => location.reload())

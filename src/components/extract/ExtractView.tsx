@@ -20,8 +20,10 @@ import { standaloneSvg, svgDataUrl } from '../../lib/svg'
 import { useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
 import { Icon } from '../Icon'
-import { Button, Divider, IconButton, isDialogOpen, isTypingTarget } from '../ui'
-import { mod, openContextMenu, type MenuItem } from '../ContextMenu'
+import { Button, Divider, IconButton } from '../ui'
+import { isTypingTarget } from '../../lib/dom'
+import { isDialogOpen } from '../../store/confirm'
+import { mod, openContextMenu, type MenuItem } from '../../store/contextMenu'
 
 type MarqueeMode = 'replace' | 'add' | 'subtract'
 const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8]

@@ -1,25 +1,12 @@
 import { memo, useMemo, useState } from 'react'
 import type { Component } from '../types'
-import { standaloneSvg, svgDataUrl } from '../lib/svg'
+import { COMPONENT_MIME, componentPreview } from '../lib/componentPreview'
 import { useLibrary } from '../store/library'
 import { useScene } from '../store/scene'
 import { notify, sourceLabel, useUi } from '../store/ui'
 import { Icon } from './Icon'
-import { confirmDialog } from './ui'
-import { openContextMenu } from './ContextMenu'
-
-export const COMPONENT_MIME = 'application/x-svg-component'
-
-const previewCache = new WeakMap<Component, string>()
-/** data:-URL превью компонента (изолированный <img>, id не пересекаются с холстом) */
-export function componentPreview(c: Component): string {
-  let url = previewCache.get(c)
-  if (!url) {
-    url = svgDataUrl(standaloneSvg(c))
-    previewCache.set(c, url)
-  }
-  return url
-}
+import { confirmDialog } from '../store/confirm'
+import { openContextMenu } from '../store/contextMenu'
 
 export function LibraryPanel() {
   const components = useLibrary((s) => s.components)

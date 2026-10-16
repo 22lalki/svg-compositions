@@ -1,5 +1,5 @@
 import { useScene } from '../../store/scene'
-import { mod, type MenuItem } from '../ContextMenu'
+import { mod, type MenuItem } from '../../store/contextMenu'
 
 /** Контекстное меню объекта на холсте (и в панели слоев) */
 export function objectMenuItems(id: string): MenuItem[] {
