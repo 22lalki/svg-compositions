@@ -74,8 +74,9 @@ export function LibraryPanel() {
     [toggle],
   )
 
-  // Выбранные — только существующие компоненты (другая вкладка могла что-то удалить)
-  const picked = useMemo(() => new Set(components.filter((c) => pickedRaw.has(c.id)).map((c) => c.id)), [components, pickedRaw])
+  // Выбранные — только видимые сейчас компоненты: удаленные в другой вкладке и скрытые фильтром не считаются,
+  // удалить можно лишь то, что видно (в режиме выбора все библиотеки раскрыты)
+  const picked = useMemo(() => new Set(visible.filter((c) => pickedRaw.has(c.id)).map((c) => c.id)), [visible, pickedRaw])
   const togglePick = useCallback((ids: string[], on: boolean) => {
     setPicked((prev) => {
       const next = new Set(prev)
@@ -199,7 +200,7 @@ export function LibraryPanel() {
             library={library}
             items={items}
             total={library ? components.filter((c) => c.libraryId === library.id).length : components.filter((c) => !c.libraryId).length}
-            open={expanded.has(id)}
+            open={picking || expanded.has(id)}
             onToggle={() => toggle(id)}
             renaming={renaming === id}
             onRename={() => setRenaming(id)}

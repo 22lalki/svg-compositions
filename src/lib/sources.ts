@@ -111,8 +111,13 @@ export function partition(objects: readonly SourceObject[], shapeCount: number):
   const list: SourceObject[] = []
   for (const o of objects) {
     if (typeof o !== 'object' || o === null || !Array.isArray(o.shapes)) continue // битая запись правок
-    const shapes = o.shapes.filter((i) => Number.isInteger(i) && i >= 0 && i < shapeCount && !seen.has(i))
-    shapes.forEach((i) => seen.add(i))
+    const shapes: number[] = []
+    for (const i of o.shapes) {
+      // Повтор внутри одного объекта тоже отбрасывается (раньше seen проверялся до добавления всего объекта)
+      if (!Number.isInteger(i) || i < 0 || i >= shapeCount || seen.has(i)) continue
+      seen.add(i)
+      shapes.push(i)
+    }
     if (shapes.length) list.push({ name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : null, shapes })
   }
   for (let i = 0; i < shapeCount; i++) if (!seen.has(i)) list.push({ name: null, shapes: [i] })
@@ -126,8 +131,8 @@ export async function loadEditedObjects(meta: SourceMeta, shapeCount: number): P
   return partition(edits.objects, shapeCount)
 }
 
-export const saveEditedObjects = (meta: SourceMeta, objects: SourceObject[]) =>
-  saveObjectEdits(meta.id, { shapeCount: objects.reduce((n, o) => n + o.shapes.length, 0), objects })
+export const saveEditedObjects = (meta: SourceMeta, objects: SourceObject[], shapeCount: number) =>
+  saveObjectEdits(meta.id, { shapeCount, objects })
 
 const objectUrls = new Map<string, Promise<string>>()
 

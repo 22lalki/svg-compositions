@@ -961,8 +961,32 @@ check('undo после удаления компонента не возвращ
 // 14. «Выделить всю группу» из фигуры, очистка холста и библиотеки
 {
   const count = async () => (await page.textContent('[data-testid="selection-count"]')).match(/\d+/)[0]
-  // 02: деревья в файле не сгруппированы — кнопка все равно выделяет дерево целиком
+  // Shift+двойной клик добавляет фигуру к уже выделенному (два клика пары его не съедают)
   await openSource('02')
+  /** Экранная точка, где сверху лежит фигура с номером index */
+  const shapePoint = (index) =>
+    page.evaluate((index) => {
+      const svg = document.querySelector('[data-source-svg]')
+      const shapes = Array.from(svg.querySelectorAll('path, rect, circle, ellipse, polygon, polyline, line')).filter(
+        (el) => !el.closest('defs, clipPath, mask, pattern, symbol, marker, linearGradient, radialGradient, filter'),
+      )
+      const el = shapes[index]
+      const r = el.getBoundingClientRect()
+      for (let y = r.top + 2; y < r.bottom; y += 3) for (let x = r.left + 2; x < r.right; x += 3) if (document.elementFromPoint(x, y) === el) return { x, y }
+      return null
+    }, index)
+  const p9 = await shapePoint(9)
+  const p10 = await shapePoint(10)
+  await page.mouse.dblclick(p9.x, p9.y)
+  await page.keyboard.press('Escape')
+  await page.keyboard.down('Shift')
+  await page.mouse.dblclick(p10.x, p10.y)
+  await page.keyboard.up('Shift')
+  const shiftDbl = await count()
+  check('Shift+двойной клик добавляет фигуру к выделенному', shiftDbl === '2', shiftDbl)
+  await page.keyboard.press('Escape')
+
+  // 02: деревья в файле не сгруппированы — кнопка все равно выделяет дерево целиком
   const crown = await srcToClient(450, 80)
   await page.mouse.dblclick(crown.x, crown.y)
   const one = await count()

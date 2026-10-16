@@ -72,6 +72,12 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   /** Фигура, по которой открыто контекстное меню (подсвечена, пока меню открыто) */
   const [menuShape, setMenuShape] = useState<number | null>(null)
   const [marquee, setMarquee] = useState<{ rect: Rect; mode: MarqueeMode } | null>(null)
+  /**
+   * Shift+двойной клик: два одиночных клика пары успевают добавить и снова убрать объект. Поэтому помним выделение
+   * перед каждым кликом (beforeClick), а на первом клике пары (click.detail === 1) фиксируем его как основу (pairBase)
+   */
+  const beforeClick = useRef<ReadonlySet<number>>(new Set())
+  const pairBase = useRef<ReadonlySet<number>>(new Set())
   const [zoom, setZoom] = useState(1)
   const [stage, setStage] = useState({ w: 0, h: 0 })
   const [name, setName] = useState('')
@@ -168,7 +174,17 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   useEffect(() => {
     if (!model || !needsHeuristic || detected) return
     // После отрисовки: исходник виден сразу, объекты появляются следом
-    const timer = setTimeout(() => setDetected(partition(detectObjects(model).map((shapes) => ({ name: null, shapes })), model.shapes.length)))
+    const timer = setTimeout(() => {
+      let found: number[][]
+      try {
+        found = detectObjects(model)
+      } catch (e) {
+        // Сбой эвристики на необычном файле: каждая фигура — сама по себе, выделение продолжает работать
+        console.error(e)
+        found = model.shapes.map((s) => [s.index])
+      }
+      setDetected(partition(found.map((shapes) => ({ name: null, shapes })), model.shapes.length))
+    })
     return () => clearTimeout(timer)
   }, [model, needsHeuristic, detected])
   const detecting = needsHeuristic && !detected
@@ -278,7 +294,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     if (!meta || !model) return
     const list = partition(next, model.shapes.length)
     setEdited(list)
-    saveEditedObjects(meta, list).catch((e: unknown) => {
+    saveEditedObjects(meta, list, model.shapes.length).catch((e: unknown) => {
       console.error(e)
       notify('Не удалось сохранить правки объектов', 'error')
     })
@@ -386,6 +402,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         // Клик по пустому месту (или промах): снять выделение. Режим не меняется — его переключает только пользователь
         if (!m.shiftKey) setSelected(new Set())
       } else {
+        beforeClick.current = selected
         // Режим объектов — персонаж/предмет целиком, режим элементов — одна фигура
         const target = mode === 'objects' ? objectOf(hit) : [hit]
         if (m.shiftKey) {
@@ -414,7 +431,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     const hit = shapeAt(e.target)
     if (hit === undefined) return
     setMode('elements')
-    setSelected((prev) => (e.shiftKey ? new Set([...prev, hit]) : new Set([hit])))
+    setSelected(e.shiftKey ? new Set([...pairBase.current, hit]) : new Set([hit]))
   }
 
   /** ПКМ: действия с фигурой под курсором и с выделением целиком */
@@ -498,7 +515,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     )
     if (hit !== undefined) {
       const named = objectAt(hit).name
-      items.push({ label: named ? `Переименовать «${named}»…` : 'Назвать объект…', icon: 'tag', onSelect: () => void nameObject(hit) })
+      items.push({ label: named ? `Переименовать «${named}»…` : 'Назвать объект…', icon: 'tag', disabled: !objects, onSelect: () => void nameObject(hit) })
     }
     if (edited) items.push({ label: 'Сбросить мои правки объектов', icon: 'undo', onSelect: () => void resetObjects() })
     items.push('separator', { label: 'Сохранить в библиотеку', icon: 'save', shortcut: 'Enter', disabled: !selected.size, onSelect: save })
@@ -593,7 +610,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
               title={hint}
               aria-pressed={mode === value}
               data-testid={`mode-${value}`}
-              onClick={() => (value === 'objects' && selected.size ? selectObjectsOfSelection() : setMode(value))}
+              onClick={() => (value === 'objects' && mode === 'elements' && selected.size ? selectObjectsOfSelection() : setMode(value))}
               className={`rounded px-2 py-1 transition ${mode === value ? 'bg-accent text-white' : 'text-muted hover:text-ink'}`}
             >
               {label}
@@ -650,6 +667,9 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
           <div
             className="flex min-h-full w-max min-w-full cursor-crosshair p-6 select-none"
             onPointerDown={onPointerDown}
+            onClick={(e) => {
+              if (e.detail === 1) pairBase.current = beforeClick.current
+            }}
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
           >
