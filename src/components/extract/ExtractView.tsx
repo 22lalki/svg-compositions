@@ -679,6 +679,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
               onPointerMove={onHover}
               onPointerLeave={() => setHover(null)}
               data-testid="extract-stage"
+              data-objects-ready={objects ? 'true' : 'false'}
             >
               <div ref={hostRef} className="absolute inset-0" />
               {model && (

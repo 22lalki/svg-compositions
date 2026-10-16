@@ -115,7 +115,7 @@ async function openSource(id) {
     const r = document.querySelector('[data-source-svg]')?.getBoundingClientRect()
     return r && r.width > 100 && r.height > 100
   })
-  await wait(500)
+  await page.waitForSelector('[data-objects-ready="true"]')
 }
 
 async function marquee([x0, y0, x1, y1], modifier) {
@@ -506,7 +506,9 @@ await page.keyboard.press('Escape')
 await page.locator(`[data-layer-id="${targetId}"]`).click()
 const at = await rightClickSelected()
 const mbox = await menu.boundingBox()
-check('ПКМ по объекту: меню открывается у курсора', Math.hypot(mbox.x - at.x, mbox.y - at.y) < 5 || (mbox.x < at.x && mbox.y < at.y + 5), `курсор ${Math.round(at.x)},${Math.round(at.y)}, меню ${Math.round(mbox.x)},${Math.round(mbox.y)}`)
+const nearX = Math.abs(mbox.x - at.x) < 5 || Math.abs(mbox.x + mbox.width - at.x) < 5
+const nearY = Math.abs(mbox.y - at.y) < 5 || Math.abs(mbox.y + mbox.height - at.y) < 5
+check('ПКМ по объекту: меню открывается у курсора', nearX && nearY, `курсор ${Math.round(at.x)},${Math.round(at.y)}, меню ${Math.round(mbox.x)},${Math.round(mbox.y)}`)
 check('ПКМ по объекту: объект выбирается', (await page.getAttribute('[data-testid="canvas"]', 'data-selected')) === targetId)
 await menuItem('Отразить по горизонтали').click()
 check('меню: «Отразить» применяется, меню закрывается', (await page.textContent('[data-testid="selection-info"]')).includes('⇋') && (await menu.count()) === 0)
@@ -555,7 +557,8 @@ check('удаление используемого компонента: пре�
 check('удаление используемого компонента: сцена цела', leftObjects === 4 && errors.length === 0, `осталось объектов: ${leftObjects}`)
 for (let i = 0; i < 5; i++) await page.keyboard.press('Control+z')
 const afterUndoDeleted = await page.locator('[data-layer-id]').count()
-check('undo после удаления компонента не возвращает «битые» объекты', afterUndoDeleted <= 4 && errors.length === 0, `объектов: ${afterUndoDeleted}`)
+const brokenLayers = await page.locator('[data-layer-id]', { hasText: 'компонент удален' }).count()
+check('undo после удаления компонента не возвращает «битые» объекты', afterUndoDeleted === 3 && brokenLayers === 0 && errors.length === 0, `объектов: ${afterUndoDeleted}, битых: ${brokenLayers}`)
 
 // 9. Свои SVG: загрузка кнопкой и перетаскиванием, извлечение, сохранение, удаление
 {
@@ -594,7 +597,11 @@ check('undo после удаления компонента не возвращ
   await clearCanvas()
   await dropComponent('Мой логотип', 600, 400)
   const mySvg = await exportSvg('_user-check')
-  check('свои SVG: компонент на холсте и в экспорте, без <style> и классов', /data-name="Мой логотип"/.test(mySvg) && !/<style|class=/.test(mySvg))
+  const logoSvg = mySvg.slice(mySvg.indexOf('data-name="Мой логотип"'))
+  check(
+    'свои SVG: стили-классы перенесены — цвета и обводка в экспорте, без <style> и классов',
+    /data-name="Мой логотип"/.test(mySvg) && /rgb\(255, 101, 132\)/.test(logoSvg) && /rgb\(63, 61, 86\)/.test(logoSvg) && /stroke-width: 6/.test(logoSvg) && !/<style|class=/.test(mySvg),
+  )
 
   // После перезагрузки загруженные файлы на месте
   await page.reload()
@@ -853,11 +860,13 @@ check('undo после удаления компонента не возвращ
   await tab2.goto(BASE)
   await tab2.waitForSelector('[data-component-id]')
   const [idA, idB] = await page.locator('[data-component-id]').evaluateAll((els) => els.slice(0, 2).map((el) => el.dataset.componentId))
+  const waitName = (tab, id, name) =>
+    tab.waitForSelector(`[data-component-id="${id}"][data-name="${name}"]`, { timeout: 5000 }).catch(() => null)
   await renameIn(page, idA, 'Переименован в первой')
-  await wait(400)
+  await waitName(tab2, idA, 'Переименован в первой')
   const seenIn2 = await nameIn(tab2, idA)
   await renameIn(tab2, idB, 'Переименован во второй')
-  await wait(400)
+  await waitName(page, idB, 'Переименован во второй')
   const seenIn1 = await nameIn(page, idB)
   await tab2.close()
   await page.reload()
@@ -1050,9 +1059,9 @@ check('undo после удаления компонента не возвращ
 }
 
 for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check', '_security-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
-writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
 check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 6, `навигаций: ${navigations}`)
+writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 
 await browser.close()
 const failed = checks.filter((c) => !c.ok)
