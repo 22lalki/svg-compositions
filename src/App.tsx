@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
-import type { SourceMeta } from './types'
-import { loadComponents, loadLibraries, loadScene, loadUserSources, saveScene } from './lib/storage'
+import type { Scene, SourceMeta } from './types'
+import {
+  loadComponents,
+  loadLibraries,
+  loadScene,
+  loadUserSources,
+  onExternalChange,
+  saveScene,
+  unreadableKeys,
+} from './lib/storage'
 import { useLibrary } from './store/library'
 import { DEFAULT_SCENE, useScene } from './store/scene'
 import { notify, useUi } from './store/ui'
@@ -12,24 +20,28 @@ import { ConfirmHost, Toasts } from './components/ui'
 import { ContextMenuHost } from './components/ContextMenu'
 import { FileDropOverlay } from './components/FileDropOverlay'
 
+const failed =
+  <T,>(fallback: T) =>
+  (e: unknown): T => {
+    console.error(e)
+    return fallback
+  }
+
 async function bootstrap() {
   const [manifest, userSources, components, libraries, scene] = await Promise.all([
     fetch('/sources/manifest.json').then((r) => {
       if (!r.ok) throw new Error(`manifest.json: ${r.status}`)
       return r.json() as Promise<Omit<SourceMeta, 'kind'>[]>
     }),
-    loadUserSources().catch((e: unknown) => {
-      console.error(e)
-      return []
-    }),
-    loadComponents().catch((e: unknown) => {
-      console.error(e)
-      notify('IndexedDB недоступна: библиотека не будет сохраняться', 'error')
-      return []
-    }),
-    loadLibraries().catch(() => []),
-    loadScene().catch(() => null),
+    loadUserSources().catch(failed([])),
+    loadComponents().catch(failed([])),
+    loadLibraries().catch(failed([])),
+    loadScene().catch(failed(null)),
   ])
+  // Что не прочиталось, то и не сохраняется (lib/storage.ts): иначе пустое состояние затерло бы данные
+  if (unreadableKeys().length) {
+    notify('Не удалось прочитать сохраненные данные браузера. Изменения пока не сохраняются, чтобы их не затереть: перезагрузите страницу', 'error')
+  }
   useUi.getState().initSources(
     manifest.map((m) => ({ ...m, kind: 'builtin' as const })),
     userSources,
@@ -41,13 +53,44 @@ async function bootstrap() {
   useScene.getState().init({ ...base, objects: base.objects.filter((o) => ids.has(o.componentId)) })
 }
 
-/** Автосохранение сцены: после каждого шага истории, но не на каждом кадре жеста */
+/**
+ * Автосохранение сцены: после каждого шага истории, но не на каждом кадре жеста.
+ * Сцена из другой вкладки применяется без обратной записи — иначе вкладки пересылали бы ее друг другу бесконечно
+ */
 function startAutosave() {
   let saved = useScene.getState().scene
-  return useScene.subscribe((s) => {
+  const unsubscribe = useScene.subscribe((s) => {
     if (s.gestureBase || s.scene === saved) return
     saved = s.scene
     saveScene(s.scene).catch((e: unknown) => console.error('Не удалось сохранить сцену', e))
+  })
+  const applyExternal = (scene: Scene) => {
+    saved = scene
+    useScene.getState().init(scene)
+  }
+  return { unsubscribe, applyExternal }
+}
+
+/** Изменения из другой вкладки: перечитать ключ и показать здесь, ничего не записывая обратно */
+function startSync(applyScene: (scene: Scene) => void) {
+  return onExternalChange((key) => {
+    const reload = async () => {
+      if (key === 'components' || key === 'libraries') {
+        const [components, libraries] = await Promise.all([loadComponents(), loadLibraries()])
+        useLibrary.getState().init(components, libraries)
+      } else if (key === 'userSources') {
+        const ui = useUi.getState()
+        const user = await loadUserSources()
+        ui.initSources(ui.builtinSources, user)
+        const open = ui.extractSourceId
+        // Открытый здесь загруженный файл удалили в другой вкладке
+        if (open && ![...ui.builtinSources, ...user].some((x) => x.id === open)) ui.closeSource()
+      } else {
+        const scene = await loadScene()
+        if (scene) applyScene(scene)
+      }
+    }
+    reload().catch((e: unknown) => console.error('Не удалось принять изменения из другой вкладки', e))
   })
 }
 
@@ -61,7 +104,12 @@ export function App() {
     bootstrap()
       .then(() => {
         if (cancelled) return
-        unsubscribe = startAutosave()
+        const autosave = startAutosave()
+        const stopSync = startSync(autosave.applyExternal)
+        unsubscribe = () => {
+          autosave.unsubscribe()
+          stopSync()
+        }
         setStatus('ready')
       })
       .catch((e: unknown) => {

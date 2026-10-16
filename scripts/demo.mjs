@@ -984,7 +984,71 @@ check('undo после удаления компонента не возвращ
   await clearCanvas()
 }
 
-// 12. Безопасность: вредоносный SVG → компонент → настоящий холст и экспорт
+// 12. Две вкладки и битые данные в IndexedDB
+{
+  const renameIn = async (tab, id, name) => {
+    const card = tab.locator(`[data-component-id="${id}"]`)
+    await card.click({ button: 'right' })
+    await tab.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Переименовать' }).click()
+    await card.getByLabel('Название компонента').fill(name)
+    await tab.keyboard.press('Enter')
+  }
+  const nameIn = (tab, id) => tab.locator(`[data-component-id="${id}"]`).getAttribute('data-name')
+  const tab2 = await context.newPage()
+  await tab2.goto(BASE)
+  await tab2.waitForSelector('[data-component-id]')
+  const [idA, idB] = await page.locator('[data-component-id]').evaluateAll((els) => els.slice(0, 2).map((el) => el.dataset.componentId))
+  await renameIn(page, idA, 'Переименован в первой')
+  await wait(400)
+  const seenIn2 = await nameIn(tab2, idA)
+  await renameIn(tab2, idB, 'Переименован во второй')
+  await wait(400)
+  const seenIn1 = await nameIn(page, idB)
+  await tab2.close()
+  await page.reload()
+  await page.waitForSelector('[data-component-id]')
+  const afterReload = [await nameIn(page, idA), await nameIn(page, idB)]
+  check(
+    'две вкладки: изменения видны в другой вкладке и не затирают друг друга',
+    seenIn2 === 'Переименован в первой' && seenIn1 === 'Переименован во второй' && afterReload.join() === 'Переименован в первой,Переименован во второй',
+    `${seenIn2} / ${seenIn1} / ${afterReload.join(', ')}`,
+  )
+
+  // Битые записи: отдельный браузерный профиль, в хранилище — мусор вперемешку с целыми записями
+  const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const p = await fresh.newPage()
+  await p.goto(BASE)
+  await p.waitForSelector('[data-testid="canvas"] svg')
+  await p.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const req = indexedDB.open('svg-constructor')
+        req.onerror = () => reject(req.error)
+        req.onsuccess = () => {
+          const tx = req.result.transaction('kv', 'readwrite')
+          const kv = tx.objectStore('kv')
+          const comp = { id: 'ok1', name: 'Целый', sourceId: '02', width: 10, height: 10, defs: '', markup: '<rect width="10" height="10" fill="#6c63ff"/>', createdAt: 1 }
+          kv.put([null, 42, { id: 'bad' }, comp], 'components')
+          kv.put([null, { id: 'lib1' }, { id: 'lib2', name: 'Папка', createdAt: 1 }], 'libraries')
+          kv.put({ width: 1200, height: 800, objects: [null, { id: 'o1', componentId: 'ok1', x: 'NaN', y: 20, scale: 1, scaleY: 1, rotation: 0, flipX: false }] }, 'scene')
+          tx.oncomplete = () => resolve(null)
+          tx.onerror = () => reject(tx.error)
+        }
+      }),
+  )
+  await p.reload()
+  await p.waitForSelector('[data-testid="canvas"] svg', { timeout: 10000 }).catch(() => {})
+  const loaded = {
+    components: await p.locator('[data-component-id]').count(),
+    libraries: await p.locator('section[data-library]').count(),
+    layers: await p.locator('[data-layer-id]').count(),
+    canvas: await p.locator('[data-testid="canvas"] svg').count(),
+  }
+  await fresh.close()
+  check('битые данные в IndexedDB: сервис загружается, целые записи на месте', loaded.canvas >= 1 && loaded.components === 1 && loaded.layers === 1 && loaded.libraries === 2, JSON.stringify(loaded))
+}
+
+// 13. Безопасность: вредоносный SVG → компонент → настоящий холст и экспорт
 {
   const errorsBefore = errors.length
   await page.setInputFiles('[data-testid="upload-input"]', [path.join(ROOT, 'src', 'dev', 'fixtures', 'malicious.svg')])
@@ -1023,7 +1087,7 @@ check('undo после удаления компонента не возвращ
 for (const f of ['_reload-check', '_undo-a', '_undo-b', '_gradients-check', '_rotate-check', '_order-check', '_user-check', '_lib-check', '_security-check']) rmSync(path.join(EXAMPLES, `${f}.svg`), { force: true })
 writeFileSync(path.join(OUT, 'checks.json'), JSON.stringify(checks, null, 2))
 check('нет ошибок в консоли', errors.length === 0, errors.join(' | '))
-check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 5, `навигаций: ${navigations}`)
+check('страница не перезагружалась сама (кроме явной перезагрузки в тесте)', navigations === 6, `навигаций: ${navigations}`)
 
 await browser.close()
 const failed = checks.filter((c) => !c.ok)

@@ -42,9 +42,17 @@ export function parseShapeRanges(spec: string): number[] {
  * null — разметки нет или она не совпадает с файлом (тогда работает эвристика).
  */
 export async function loadSourceObjects(meta: SourceMeta, model: SourceModel): Promise<SourceObject[] | null> {
+  // Неудачная загрузка не запоминается: следующий исходник попробует снова
   annotations ??= fetch('/sources/objects.json')
-    .then((r) => (r.ok ? (r.json() as Promise<Record<string, Annotation>>) : {}))
-    .catch(() => ({}))
+    .then((r) => {
+      if (!r.ok) throw new Error(`objects.json: HTTP ${r.status}`)
+      return r.json() as Promise<Record<string, Annotation>>
+    })
+    .catch((e: unknown) => {
+      console.error(e)
+      annotations = null
+      return {}
+    })
   const all = await annotations
   const shapeCount = model.shapes.length
   if (meta.kind === 'builtin') {
@@ -102,6 +110,7 @@ export function partition(objects: readonly SourceObject[], shapeCount: number):
   const seen = new Set<number>()
   const list: SourceObject[] = []
   for (const o of objects) {
+    if (typeof o !== 'object' || o === null || !Array.isArray(o.shapes)) continue // битая запись правок
     const shapes = o.shapes.filter((i) => Number.isInteger(i) && i >= 0 && i < shapeCount && !seen.has(i))
     shapes.forEach((i) => seen.add(i))
     if (shapes.length) list.push({ name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : null, shapes })
