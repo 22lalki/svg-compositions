@@ -37,21 +37,8 @@ export function SourcesPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-2 px-4 pt-3 pb-2">
-        <div>
-          <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Исходники</h2>
-          <p className="mt-0.5 text-xs text-muted">Клик — режим выделения</p>
-        </div>
-        <button
-          type="button"
-          onClick={pickFiles}
-          disabled={busy}
-          title="Загрузить свои SVG (можно несколько или перетащить в окно)"
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-line px-2 text-xs font-medium hover:border-accent hover:text-accent-strong disabled:opacity-50"
-          data-testid="upload-svg"
-        >
-          <Icon name="upload" size={13} /> {busy ? 'Загрузка…' : 'Загрузить'}
-        </button>
+      <div className="px-4 pt-3 pb-1">
+        <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Исходники</h2>
         <input
           ref={inputRef}
           type="file"
@@ -70,21 +57,22 @@ export function SourcesPanel() {
       <div className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
         <SectionTitle title="Мои SVG" count={user.length} hint="в этом браузере" />
         <ul className="grid grid-cols-2 gap-2" data-testid="user-sources">
-          {user.map((s) => (
-            <SourceCard key={s.id} meta={s} active={s.id === activeId} count={counts.get(s.id) ?? 0} />
-          ))}
-          <li className={user.length ? '' : 'col-span-2'}>
+          {/* Загрузка — всегда первой строкой, на ширину двух карточек */}
+          <li className="col-span-2">
             <button
               type="button"
               onClick={pickFiles}
               disabled={busy}
-              className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line px-2 text-center text-[11px] leading-tight text-muted transition hover:border-accent hover:text-accent-strong"
-              style={user.length ? undefined : { aspectRatio: 'auto', height: 72 }}
+              data-testid="upload-tile"
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line px-3 text-[11px] leading-tight text-muted transition hover:border-accent hover:text-accent-strong disabled:opacity-50"
             >
-              <Icon name="upload" size={16} />
-              {user.length ? 'Загрузить' : 'Загрузите свой SVG или перетащите файл в окно'}
+              <Icon name="upload" size={16} className="shrink-0" />
+              <span>{busy ? 'Загрузка…' : 'Загрузите SVG или перетащите файл в окно'}</span>
             </button>
           </li>
+          {user.map((s) => (
+            <SourceCard key={s.id} meta={s} active={s.id === activeId} count={counts.get(s.id) ?? 0} />
+          ))}
         </ul>
 
         <SectionTitle title="Встроенные" count={builtin.length} hint="общие для всех" />

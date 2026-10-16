@@ -617,23 +617,6 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
               <Icon name="save" /> Сохранить в библиотеку
             </Button>
           </form>
-          <ul className="mt-auto space-y-1.5 border-t border-line px-4 py-3 text-[11px] leading-snug text-muted">
-            <li>
-              <b className="text-ink">Клик</b> — объект целиком (персонаж, предмет), <kbd>Shift</kbd>+клик — добавить/убрать
-            </li>
-            <li>
-              <b className="text-ink">Двойной клик</b> — отдельная фигура, дальше <kbd>Shift</kbd>+клик добавляет фигуры
-            </li>
-            <li>
-              <b className="text-ink">Рамка</b> — фигуры целиком внутри, <kbd>Shift</kbd> — добавить, <kbd>Alt</kbd> — вычесть
-            </li>
-            <li>
-              <kbd>↑</kbd> — к объекту / группе, <kbd>Ctrl</kbd>+<kbd>A</kbd> — все
-            </li>
-            <li>
-              <kbd>Enter</kbd> — сохранить, <kbd>Esc</kbd> — к объектам / снять выделение / к холсту
-            </li>
-          </ul>
         </aside>
       </div>
     </div>

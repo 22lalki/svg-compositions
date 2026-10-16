@@ -135,9 +135,6 @@ export function LibraryPanel() {
           </LibrarySection>
         ))}
       </div>
-      <p className="border-t border-line px-4 py-2 text-[11px] leading-snug text-muted">
-        Клик — на холст. Перетаскивание — на холст или в другую библиотеку.
-      </p>
     </div>
   )
 }
