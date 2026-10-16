@@ -7,7 +7,7 @@ import {
   IDENTITY,
   inflate,
   isAxisAligned,
-  meanScale,
+  maxScale,
   mul,
   rectCorners,
   toTransformString,
@@ -25,6 +25,11 @@ export const NON_RENDERED = 'defs, clipPath, mask, pattern, symbol, marker, line
 
 /** Наследуемые свойства, которые переносим на клон, если они пришли от предка */
 const INHERITED_PROPS = [
+  'color', // для fill="currentColor"
+  'marker-start',
+  'marker-mid',
+  'marker-end',
+  'paint-order',
   'fill',
   'fill-opacity',
   'fill-rule',
@@ -82,8 +87,23 @@ function hasOwnProp(el: Element, prop: string): boolean {
   return el.hasAttribute(prop) || (el instanceof SVGElement && el.style.getPropertyValue(prop) !== '')
 }
 
+/**
+ * Скрытая фигура (слой, выключенный в Inkscape/Illustrator): display:none у нее или у предка либо visibility
+ * hidden/collapse в ближайшем месте, где оно задано. Смотрим атрибуты и inline-стили, а не вычисленный стиль:
+ * при загрузке файл разбирается в невидимом контейнере, и вычисленный visibility там всегда hidden
+ */
+function isHidden(el: Element): boolean {
+  let visibility: string | null = null
+  for (let n: Element | null = el; n instanceof SVGElement; n = n.parentElement) {
+    const display = n.style.getPropertyValue('display') || n.getAttribute('display')
+    if (display?.trim() === 'none') return true
+    visibility ??= n.style.getPropertyValue('visibility') || n.getAttribute('visibility')
+  }
+  return visibility?.trim() === 'hidden' || visibility?.trim() === 'collapse'
+}
+
 function isRenderedShape(el: Element): el is SVGGeometryElement {
-  return el instanceof SVGGeometryElement && !el.closest(NON_RENDERED)
+  return el instanceof SVGGeometryElement && !el.closest(NON_RENDERED) && !isHidden(el)
 }
 
 /** Фигуры исходника в порядке документа (без содержимого defs, clipPath и т.п.) */
@@ -114,7 +134,7 @@ function shapeBounds(el: SVGGeometryElement, m: Mat, local: Rect): Rect {
   const cs = getComputedStyle(el)
   if (cs.stroke && cs.stroke !== 'none') {
     const sw = parseFloat(cs.strokeWidth) || 0
-    if (sw > 0) return inflate(geometry, (sw / 2) * meanScale(m))
+    if (sw > 0) return inflate(geometry, (sw / 2) * maxScale(m))
   }
   return geometry
 }
@@ -191,7 +211,9 @@ export function selectionBounds(model: SourceModel, selected: Iterable<number>):
     const s = model.shapes[i]
     if (s) rects.push(s.bbox)
   }
-  return unionRects(rects)
+  // Пустая геометрия (path d="") дает рамку 0×0 где-то в стороне — она не должна раздувать компонент
+  const real = rects.filter((r) => r.width > 0 || r.height > 0)
+  return unionRects(real.length ? real : rects)
 }
 
 /**
@@ -249,7 +271,9 @@ function cloneShape(shape: SourceShape, root: SVGSVGElement): Element {
   const groupOpacity = ancestorsOpacity(el, root)
   if (groupOpacity < 1 - 1e-6) {
     const own = parseFloat(getComputedStyle(el).opacity)
-    clone.setAttribute('opacity', fmt((Number.isFinite(own) ? own : 1) * groupOpacity, 4))
+    // В style: у фигуры может быть свой style="opacity:…" (Inkscape, Illustrator) — он перекрыл бы атрибут
+    clone.removeAttribute('opacity')
+    ;(clone as SVGElement).style.setProperty('opacity', fmt((Number.isFinite(own) ? own : 1) * groupOpacity, 4))
   }
   return clone
 }

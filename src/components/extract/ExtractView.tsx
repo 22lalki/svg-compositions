@@ -104,7 +104,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         svg.removeAttribute('height')
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
         svg.setAttribute('data-source-svg', meta.id)
-        svg.style.cssText = 'display:block;width:100%;height:100%;overflow:visible'
+        // Только размеры и показ: собственный style корня (fill, opacity…) наследуется фигурами и должен остаться
+        for (const [prop, value] of [['display', 'block'], ['width', '100%'], ['height', '100%'], ['overflow', 'visible']]) svg.style.setProperty(prop!, value!)
         hostRef.current.replaceChildren(svg)
         const next = analyzeSource(svg, meta)
         setAnnotated(null)

@@ -12,8 +12,11 @@ export function serializeFragment(node: Element): string {
   return serializer.serializeToString(node).replace(/ xmlns(?::xlink)?="[^"]*"/g, '')
 }
 
+/** Экранирование для атрибутов XML; символы, недопустимые в XML (управляющие, одиночные суррогаты), удаляются */
 export function escapeXml(s: string): string {
-  return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`)
+  return s
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+    .replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`)
 }
 
 /** Самостоятельный SVG-документ из defs и разметки (превью компонента) */

@@ -45,7 +45,8 @@ export function invert(m: Mat): Mat {
 }
 
 /** Средний линейный масштаб матрицы (для толщины обводки) */
-export const meanScale = (m: Mat) => Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]))
+/** Наибольшее растяжение по осям: обводка в scale(4 1) толще по растянутой оси, средний масштаб ее недооценит */
+export const maxScale = (m: Mat) => Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3]))
 
 /** Нет поворота и скоса: bbox переносится точно по углам */
 export const isAxisAligned = (m: Mat) => Math.abs(m[1]) < 1e-9 && Math.abs(m[2]) < 1e-9

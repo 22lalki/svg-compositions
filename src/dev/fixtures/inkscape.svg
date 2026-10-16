@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Приемы экспорта из Inkscape и Illustrator: прозрачность слоя и фигуры в style, скрытые слои,
+       currentColor от группы, маркеры, заданные на группе -->
+  <defs>
+    <marker id="dot" markerUnits="userSpaceOnUse" markerWidth="4" markerHeight="4" refX="2" refY="2" viewBox="0 0 4 4">
+      <circle cx="2" cy="2" r="2" fill="#ff6584"/>
+    </marker>
+  </defs>
+  <g style="opacity:0.5">
+    <rect x="10" y="10" width="80" height="80" style="opacity:0.9;fill:#6c63ff"/>
+  </g>
+  <g style="display:none"><rect x="100" y="10" width="80" height="80" fill="#e11d48"/></g>
+  <g visibility="hidden"><circle cx="150" cy="60" r="30" fill="#e11d48"/></g>
+  <g color="#2f2e41"><rect x="10" y="110" width="80" height="40" fill="currentColor"/></g>
+  <g marker-mid="url(#dot)" stroke="#3f3d56" stroke-width="3" fill="none"><polyline points="100,150 140,170 180,190"/></g>
+</svg>

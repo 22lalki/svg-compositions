@@ -156,6 +156,10 @@ export function sanitizeSvg(root: Element, { keepStyles = true } = {}) {
 
 /** Свойства, которые таблица стилей может задать и которые влияют на вид фигур */
 const STYLE_PROPS = [
+  'color',
+  'marker-start',
+  'marker-mid',
+  'marker-end',
   'fill',
   'fill-opacity',
   'fill-rule',
