@@ -1,0 +1,22 @@
+[
+  { "id": "01", "title": "AI-ассистент", "file": "01.svg", "originalName": "undraw_ai-code-assistant_5xop.svg" },
+  { "id": "02", "title": "Игра с собакой", "file": "02.svg", "originalName": "undraw_playing-fetch_eij7.svg" },
+  { "id": "03", "title": "Астрономия", "file": "03.svg", "originalName": "undraw_astronomy_ied1.svg" },
+  { "id": "04", "title": "День на пляже", "file": "04.svg", "originalName": "undraw_beach-day_cnsv.svg" },
+  { "id": "05", "title": "Облака", "file": "05.svg", "originalName": "undraw_clouds_bmtk.svg" },
+  { "id": "06", "title": "Обмен валют", "file": "06.svg", "originalName": "undraw_currency-conversion_933g.svg" },
+  { "id": "07", "title": "Звездное окно", "file": "07.svg", "originalName": "undraw_starry-window_yiga.svg" },
+  { "id": "08", "title": "Геймпад", "file": "08.svg", "originalName": "undraw_game-controller_98ox.svg" },
+  { "id": "09", "title": "Поиск места", "file": "09.svg", "originalName": "undraw_location-search_9mdg.svg" },
+  { "id": "10", "title": "Денежный дождь", "file": "10.svg", "originalName": "undraw_make-it-rain_ylfg.svg" },
+  { "id": "11", "title": "Фудтрак", "file": "11.svg", "originalName": "undraw_food-truck_my6o.svg" },
+  { "id": "12", "title": "Питомец", "file": "12.svg", "originalName": "undraw_petting_xclp.svg" },
+  { "id": "13", "title": "Готов к осени", "file": "13.svg", "originalName": "undraw_ready-for-autumn_netb.svg" },
+  { "id": "14", "title": "Домик в глуши", "file": "14.svg", "originalName": "undraw_remote-cabin_6x4q.svg" },
+  { "id": "15", "title": "Газировка", "file": "15.svg", "originalName": "undraw_soda-splash_1ti2.svg" },
+  { "id": "16", "title": "Звезды", "file": "16.svg", "originalName": "undraw_stars_5pgw.svg" },
+  { "id": "17", "title": "Бизнес-график", "file": "17.svg", "originalName": "undraw_business-chart_coy5.svg" },
+  { "id": "18", "title": "Виртуальная реальность", "file": "18.svg", "originalName": "undraw_virtual-reality_4fo0.svg" },
+  { "id": "19", "title": "Зимняя прогулка", "file": "19.svg", "originalName": "undraw_winter-walk_m5sd.svg" },
+  { "id": "20", "title": "Кардиограмма", "file": "20.svg", "originalName": "electrocardiogram-svgrepo-com.svg" }
+]

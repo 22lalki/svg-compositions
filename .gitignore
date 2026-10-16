@@ -1,0 +1,9 @@
+node_modules
+dist
+*.local
+.vercel
+test-results
+scripts/.out
+
+# Текст задания — не часть кода
+tz-svg-constructor.md
