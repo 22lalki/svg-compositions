@@ -18,7 +18,7 @@ import {
 import { shortId } from '../../lib/ids'
 import { standaloneSvg, svgDataUrl } from '../../lib/svg'
 import { sanitizeSvg } from '../../lib/importSvg'
-import { loadSourceText } from '../../lib/sources'
+import { loadSourceObjects, loadSourceText, type SourceObject } from '../../lib/sources'
 import { detectObjects } from '../../lib/objects'
 import { GENERAL_LIBRARY_NAME, libraryName, useLibrary } from '../../store/library'
 import { notify, useUi } from '../../store/ui'
@@ -63,6 +63,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const [stage, setStage] = useState({ w: 0, h: 0 })
   const [name, setName] = useState('')
   const [mode, setMode] = useState<ClickMode>('objects')
+  /** Разметка объектов из objects.json; null — нет, работает эвристика */
+  const [annotated, setAnnotated] = useState<SourceObject[] | null>(null)
 
   // Загрузка исходника инлайном: нужны клики, getBBox и вычисленные стили.
   // Перезагружаем только при смене исходника (переименование не сбрасывает выделение)
@@ -93,7 +95,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
         svg.setAttribute('data-source-svg', meta.id)
         svg.style.cssText = 'display:block;width:100%;height:100%;overflow:visible'
         hostRef.current.replaceChildren(svg)
-        setModel(analyzeSource(svg, meta))
+        const next = analyzeSource(svg, meta)
+        setAnnotated(null)
+        setModel(next)
+        // Готовая разметка объектов для встроенных исходников (иначе — эвристика)
+        void loadSourceObjects(meta, next.shapes.length).then((list) => !cancelled && setAnnotated(list))
       })
       .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
     return () => {
@@ -122,15 +128,31 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const previewUrl = useMemo(() => (preview ? svgDataUrl(standaloneSvg(preview)) : null), [preview])
   const bounds = useMemo(() => (model ? selectionBounds(model, selected) : null), [model, selected])
 
-  // Логические объекты (персонаж, животное, предмет) для выделения одним кликом
+  // Логические объекты (персонаж, животное, предмет) для выделения одним кликом:
+  // у встроенных исходников — готовая именованная разметка, у загруженных — эвристика
   const objects = useMemo(() => {
     if (!model) return null
-    const list = detectObjects(model)
+    const list: SourceObject[] = annotated ?? detectObjects(model).map((shapes) => ({ name: null, shapes }))
     const of = new Int32Array(model.shapes.length)
-    list.forEach((shapes, k) => shapes.forEach((i) => (of[i] = k)))
+    list.forEach((o, k) => o.shapes.forEach((i) => (of[i] = k)))
     return { list, of }
-  }, [model])
-  const objectOf = (i: number): number[] => objects?.list[objects.of[i]!] ?? [i]
+  }, [model, annotated])
+  const objectAt = (i: number): SourceObject => objects?.list[objects.of[i]!] ?? { name: null, shapes: [i] }
+  const objectOf = (i: number): number[] => objectAt(i).shapes
+
+  /** Имя по умолчанию: если выделены ровно 1–3 именованных объекта — их имена */
+  const suggestedName = useMemo(() => {
+    if (!objects || selected.size === 0) return null
+    const ks = new Set([...selected].map((i) => objects.of[i]!))
+    if (ks.size > 3) return null
+    const list = [...ks].map((k) => objects.list[k]!)
+    const exact = list.every((o) => o.name && o.shapes.every((i) => selected.has(i)))
+    const total = list.reduce((n, o) => n + o.shapes.length, 0)
+    if (!exact || total !== selected.size) return null
+    const names = list.map((o) => o.name!)
+    return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} и ${names.at(-1)!.toLowerCase()}`
+  }, [objects, selected])
+  const defaultName = suggestedName ?? `${meta?.title ?? ''} — фрагмент ${fromThisSource + 1}`
 
   function toRoot(clientX: number, clientY: number): Point {
     const ctm = model?.svg.getScreenCTM()
@@ -163,7 +185,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     if (!result) return
     const component: Component = {
       id,
-      name: name.trim() || `${meta.title} — фрагмент ${fromThisSource + 1}`,
+      name: name.trim() || defaultName,
       sourceId: meta.id,
       width: result.width,
       height: result.height,
@@ -271,7 +293,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       const isSelected = selected.has(hit)
       // Объект целиком (персонаж, предмет)
       items.push({
-        label: `Выделить объект (${obj.length})`,
+        label: objectAt(hit).name ? `Выделить «${objectAt(hit).name}»` : `Выделить объект (${obj.length})`,
         icon: 'marquee',
         disabled: objSelected && selected.size === obj.length,
         onSelect: () => {
@@ -391,9 +413,17 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
   const highlight = menuShape ?? hover
   const hoverShape = highlight !== null && (menuShape !== null || !selected.has(highlight)) ? model?.shapes[highlight] : undefined
   // В режиме объектов подсвечиваем то, что выделит клик: объект целиком
+  const hoverObj = hoverShape && mode === 'objects' ? objectAt(hoverShape.index) : null
   const hoverObject =
-    model && hoverShape && mode === 'objects' && objectOf(hoverShape.index).length > 1
-      ? selectionBounds(model, objectOf(hoverShape.index))
+    model && hoverObj && (hoverObj.shapes.length > 1 || hoverObj.name) ? selectionBounds(model, hoverObj.shapes) : null
+  /** Подпись объекта над рамкой подсветки (в пикселях сцены) */
+  const hoverLabel =
+    hoverObject && hoverObj?.name && menuShape === null
+      ? {
+          text: hoverObj.name,
+          left: ((hoverObject.x - vb.x) / vb.width) * display.w,
+          top: ((hoverObject.y - vb.y) / vb.height) * display.h,
+        }
       : null
   const marqueeColor = marquee?.mode === 'subtract' ? '#e11d48' : marquee?.mode === 'add' ? '#059669' : '#6c63ff'
 
@@ -541,6 +571,15 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
                   )}
                 </svg>
               )}
+              {hoverLabel && (
+                <div
+                  data-testid="hover-label"
+                  className="pointer-events-none absolute -translate-y-full rounded bg-amber-500 px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap text-white shadow-sm"
+                  style={{ left: hoverLabel.left, top: Math.max(hoverLabel.top - 2, 18) }}
+                >
+                  {hoverLabel.text}
+                </div>
+              )}
             </div>
           </div>
           {error && (
@@ -595,7 +634,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={`${meta.title} — фрагмент ${fromThisSource + 1}`}
+              placeholder={defaultName}
               aria-label="Название компонента"
               className="h-9 w-full rounded-md border border-line px-2.5 text-sm outline-none focus:border-accent"
             />

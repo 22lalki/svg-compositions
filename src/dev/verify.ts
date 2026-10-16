@@ -251,6 +251,11 @@ async function verifyFixture(name: string, text: string, host: HTMLElement): Pro
 }
 
 async function main() {
+  // ?idle — только загрузить модули (для scripts/annotate.mjs), без самопроверки
+  if (location.search.includes('idle')) {
+    document.title = 'verify: done'
+    return
+  }
   const host = document.getElementById('host')!
   const manifest = (await fetch('/sources/manifest.json').then((r) => r.json())) as SourceMeta[]
   const results: CaseResult[] = []
