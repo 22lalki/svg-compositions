@@ -135,17 +135,18 @@ export const useScene = create<SceneState>()((set, get) => ({
 
   updateObject: (id, patch, coalesceKey) => get().commit((s) => mapObject(s, id, (o) => ({ ...o, ...patch })), coalesceKey),
 
+  // Во время жеста (перетаскивание, ручки) правки не применяются — и выделение тоже не меняем
   removeSelected: () => {
-    const { selectedId } = get()
-    if (!selectedId) return
+    const { selectedId, gestureBase } = get()
+    if (!selectedId || gestureBase) return
     get().commit((s) => ({ ...s, objects: s.objects.filter((o) => o.id !== selectedId) }))
     set({ selectedId: null })
   },
 
   duplicateSelected: () => {
-    const { selectedId, scene } = get()
+    const { selectedId, scene, gestureBase } = get()
     const src = scene.objects.find((o) => o.id === selectedId)
-    if (!src) return
+    if (!src || gestureBase) return
     const copy: SceneObject = { ...src, id: shortId(), x: src.x + 20, y: src.y + 20 }
     get().commit((s) => {
       const objects = [...s.objects]
@@ -198,10 +199,17 @@ export const useScene = create<SceneState>()((set, get) => ({
         : s
     const { scene, past, future, selectedId } = get()
     const next = strip(scene)
+    // Шаги, которые касались только удаленного компонента, после чистки совпадают с соседними — убираем их,
+    // иначе Ctrl+Z «ничего не делает»
+    const same = (a: Scene, b: Scene) =>
+      a.width === b.width && a.height === b.height && a.objects.length === b.objects.length && a.objects.every((o, i) => o === b.objects[i])
+    const distinct = (list: Scene[], edge: Scene) =>
+      list.filter((x, i) => !same(x, list[i + 1] ?? edge))
+    const stripped = future.map(strip)
     set({
       scene: next,
-      past: past.map(strip),
-      future: future.map(strip),
+      past: distinct(past.map(strip), next),
+      future: distinct(stripped.reverse(), next).reverse(),
       gestureBase: null,
       lastCommit: null,
       selectedId: next.objects.some((o) => o.id === selectedId) ? selectedId : null,

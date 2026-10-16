@@ -16,6 +16,7 @@ import { framePoint, normalizeAngle, objectFrame, objectTransform, rotateVec } f
 import { useComponentMap } from '../../store/library'
 import { useScene } from '../../store/scene'
 import { isTypingTarget } from '../../lib/dom'
+import { isDialogOpen } from '../../store/confirm'
 import { COMPONENT_MIME } from '../../lib/componentPreview'
 import { svgNodes } from '../../lib/markup'
 import { Icon } from '../Icon'
@@ -35,7 +36,7 @@ let rememberedView: { view: View; artboard: string } | null = null
 
 type Gesture =
   | { kind: 'move'; id: string; start: Point; startClient: Point; orig: SceneObject; active: boolean }
-  | { kind: 'scale'; id: string; sx: number; sy: number; orig: SceneObject; size: Component; active: boolean }
+  | { kind: 'scale'; id: string; sx: number; sy: number; start: Point; orig: SceneObject; size: Component; active: boolean }
   | { kind: 'rotate'; id: string; startAngle: number; orig: SceneObject; size: Component; active: boolean }
   | { kind: 'pan'; startClient: Point; orig: View; deselect: boolean; active: boolean }
 
@@ -125,7 +126,8 @@ export function Viewport() {
   // Пробел — временная рука
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isTypingTarget(e.target)) {
+      const control = e.target instanceof Element && e.target.closest('button, a[href], select, [role="button"], [role="menuitem"]')
+      if (e.code === 'Space' && !isTypingTarget(e.target) && !control && !isDialogOpen()) {
         e.preventDefault()
         setSpaceDown(true)
       }
@@ -153,6 +155,10 @@ export function Viewport() {
     }
 
     const onMove = (ev: PointerEvent) => {
+      if (ev.buttons === 0) {
+        finish()
+        return
+      }
       const p = toArtboard(ev.clientX, ev.clientY)
       switch (g.kind) {
         case 'pan': {
@@ -179,16 +185,22 @@ export function Viewport() {
           activate()
           const o = g.orig
           const f = objectFrame(o, g.size)
-          // Курсор в системе координат объекта: поворот снят, масштаб — от центра
-          const local = rotateVec({ x: p.x - f.center.x, y: p.y - f.center.y }, -o.rotation)
+          // Курсор в системе координат объекта: поворот снят, масштаб — от центра. Считаем относительно точки,
+          // где ручку взяли (обычно в паре пикселей от угла), иначе объект прыгает на первом же движении
+          const toLocal = (q: Point) => rotateVec({ x: q.x - f.center.x, y: q.y - f.center.y }, -o.rotation)
+          const local = toLocal(p)
+          const local0 = toLocal(g.start)
+          const ratio = (now: number, then: number, fallback: number) => (Math.abs(then) > 1e-6 ? now / then : fallback)
           let scale: number
           let scaleY: number
           if (ev.shiftKey) {
-            scale = Math.max(MIN_SCALE, (local.x * g.sx) / (g.size.width / 2))
-            scaleY = Math.max(MIN_SCALE, (local.y * g.sy) / (g.size.height / 2))
+            scale = Math.max(MIN_SCALE, o.scale * ratio(local.x * g.sx, local0.x * g.sx, (local.x * g.sx) / (g.size.width / 2) / o.scale))
+            scaleY = Math.max(MIN_SCALE, o.scaleY * ratio(local.y * g.sy, local0.y * g.sy, (local.y * g.sy) / (g.size.height / 2) / o.scaleY))
           } else {
             const d = { x: g.sx * f.hw, y: g.sy * f.hh }
-            const k = Math.max((local.x * d.x + local.y * d.y) / (d.x * d.x + d.y * d.y), MIN_SCALE / Math.min(o.scale, o.scaleY))
+            const proj = (v: Point) => (v.x * d.x + v.y * d.y) / (d.x * d.x + d.y * d.y)
+            const k0 = proj(local0)
+            const k = Math.max(k0 > 0.2 ? proj(local) / k0 : proj(local), MIN_SCALE / Math.min(o.scale, o.scaleY))
             scale = o.scale * k
             scaleY = o.scaleY * k
           }
@@ -207,10 +219,11 @@ export function Viewport() {
       }
     }
 
-    const finish = () => {
+    function finish() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
+      window.removeEventListener('blur', finish)
       setGestureKind(null)
       if (g.kind === 'pan') {
         if (!g.active && g.deselect) store.select(null)
@@ -221,6 +234,7 @@ export function Viewport() {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', finish)
+    window.addEventListener('blur', finish)
   }
 
   function onPointerDown(e: ReactPointerEvent<SVGSVGElement>) {
@@ -249,7 +263,8 @@ export function Viewport() {
         startGesture({ kind: 'rotate', id: selectedObj.id, startAngle, orig: selectedObj, size: selectedComp, active: false })
       } else {
         const [, sx, sy] = handle.split(':').map(Number)
-        startGesture({ kind: 'scale', id: selectedObj.id, sx: sx!, sy: sy!, orig: selectedObj, size: selectedComp, active: false })
+        const start = toArtboard(e.clientX, e.clientY)
+        startGesture({ kind: 'scale', id: selectedObj.id, sx: sx!, sy: sy!, start, orig: selectedObj, size: selectedComp, active: false })
       }
       return
     }

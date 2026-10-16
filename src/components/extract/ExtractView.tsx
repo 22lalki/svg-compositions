@@ -336,6 +336,8 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       altKey: ev.altKey || downMods.altKey,
     })
     const onMove = (ev: PointerEvent) => {
+      // Кнопку отпустили за пределами окна: рамка отменяется, а не применяется при следующем клике где угодно
+      if (ev.buttons === 0) return finish(ev, true)
       if (!dragging && Math.hypot(ev.clientX - startClient.x, ev.clientY - startClient.y) < 4) return
       dragging = true
       setHover(null)
@@ -345,6 +347,7 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('blur', onBlur)
       setMarquee(null)
       if (cancelled) return
       const m = mods(ev)
@@ -382,9 +385,11 @@ export function ExtractView({ sourceId }: { sourceId: string }) {
     }
     const onUp = (ev: PointerEvent) => finish(ev)
     const onCancel = (ev: PointerEvent) => finish(ev, true)
+    const onBlur = () => finish(new PointerEvent('pointercancel'), true)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('blur', onBlur)
   }
 
   /** Двойной клик — режим элементов: выделяется сама фигура, дальше Shift+клик добавляет фигуры */

@@ -935,7 +935,56 @@ check('undo после удаления компонента не возвращ
   )
 }
 
-// 11. Безопасность: вредоносный SVG → компонент → настоящий холст и экспорт
+// 11. Клавиатура и мышь: пробел на кнопке, Ctrl+D во время перетаскивания, ручка масштаба, Esc в диалоге
+{
+  await clearCanvas()
+  await dropComponent(C.dog.name, 600, 400)
+  await wait(300)
+  // Пробел нажимает кнопку в фокусе, а не включает «руку»
+  await page.getByRole('button', { name: 'Отменить' }).focus()
+  await page.keyboard.press('Space')
+  await wait(200)
+  const afterSpace = await page.locator('[data-layer-id]').count()
+  await page.keyboard.press('Control+Shift+z')
+  await wait(200)
+  // Ctrl+D посреди перетаскивания не делает ничего: ни копии, ни выделения несуществующей копии
+  const obj = page.locator('[data-testid="canvas"] [data-obj-id]').first()
+  const ob = await obj.boundingBox()
+  const [ox, oy] = [ob.x + ob.width / 2, ob.y + ob.height / 2]
+  await page.mouse.move(ox, oy)
+  await page.mouse.down()
+  await page.mouse.move(ox + 30, oy + 10, { steps: 4 })
+  await page.keyboard.press('Control+d')
+  await page.mouse.move(ox + 40, oy + 20, { steps: 2 })
+  await page.mouse.up()
+  const midSelected = await page.getAttribute('[data-testid="canvas"]', 'data-selected')
+  const midDrag = { layers: await page.locator('[data-layer-id]').count(), selectedExists: (await page.locator(`[data-layer-id="${midSelected}"]`).count()) === 1 }
+  // Ручку масштаба берут в нескольких пикселях от угла: на первом движении объект не прыгает
+  const hb = await page.locator('[data-handle="scale:1:1"]').boundingBox()
+  const [gx, gy] = [hb.x + hb.width / 2 + 5, hb.y + hb.height / 2 + 5]
+  await page.mouse.move(gx, gy)
+  await page.mouse.down()
+  await page.mouse.move(gx + 1, gy + 1)
+  const scalePct = Number((await page.locator('[data-testid="selection-info"] span').nth(2).textContent()).replace(/[^\d.]/g, ''))
+  await page.mouse.up()
+  // Esc закрывает диалог, но не снимает выделение на холсте
+  const selBefore = await page.getAttribute('[data-testid="canvas"]', 'data-selected')
+  await page.locator(`[data-component-id][data-name="${C.dog.name}"]`).first().click({ button: 'right' })
+  await page.locator('[data-testid="context-menu"]').getByRole('menuitem', { name: 'Удалить' }).click()
+  await page.locator('[role="dialog"]').waitFor()
+  await page.keyboard.press('Escape')
+  await wait(200)
+  const selAfter = await page.getAttribute('[data-testid="canvas"]', 'data-selected')
+  const dialogGone = (await page.locator('[role="dialog"]').count()) === 0
+  check('клавиатура: пробел нажимает кнопку в фокусе («Отменить» убрал объект)', afterSpace === 0, String(afterSpace))
+  check('мышь: Ctrl+D во время перетаскивания ничего не делает', midDrag.layers === 1 && midDrag.selectedExists, JSON.stringify(midDrag))
+  // Сдвиг на 1 px дает около +2%; прежний расчет от угла, а не от точки захвата, давал около 111%
+  check('мышь: ручка масштаба без скачка на первом пикселе', scalePct >= 99 && scalePct <= 104, `${scalePct}%`)
+  check('клавиатура: Esc закрывает диалог, выделение на холсте остается', dialogGone && !!selAfter && selBefore === selAfter, `${selBefore} → ${selAfter}`)
+  await clearCanvas()
+}
+
+// 12. Безопасность: вредоносный SVG → компонент → настоящий холст и экспорт
 {
   const errorsBefore = errors.length
   await page.setInputFiles('[data-testid="upload-input"]', [path.join(ROOT, 'src', 'dev', 'fixtures', 'malicious.svg')])

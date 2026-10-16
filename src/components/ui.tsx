@@ -62,7 +62,11 @@ export function ConfirmHost() {
     if (inputRef.current) inputRef.current.select()
     else confirmRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') resolveConfirm(false)
+      if (e.key !== 'Escape') return
+      // Esc закрывает только диалог: выделение и режим под ним не трогаются
+      e.preventDefault()
+      e.stopPropagation()
+      resolveConfirm(false)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
