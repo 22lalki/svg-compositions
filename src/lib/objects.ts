@@ -376,9 +376,11 @@ function markItems(units: Unit[], model: SourceModel, masks: Mask[]): Unit[] {
 export const shapeAreas = (model: SourceModel) => buildMasks(model).map((m) => m.count)
 
 export function detectObjects(model: SourceModel): number[][] {
+  const { width: VW, height: VH } = model.viewBox
+  // Вырожденный рисунок (нулевой viewBox): растра нет — каждая фигура сама по себе
+  if (!(VW > 0 && VH > 0 && Number.isFinite(VW) && Number.isFinite(VH))) return model.shapes.map((s) => [s.index])
   const masks = buildMasks(model)
   const total = masks.reduce((n, m) => n + m.count, 0)
-  const { width: VW, height: VH } = model.viewBox
   const side = Math.max(VW, VH)
   const clusters: Cluster[] = []
   // Две крупные формы, лишь частично перекрывающие друг друга (кроны деревьев, солнце за зонтом), — разные объекты

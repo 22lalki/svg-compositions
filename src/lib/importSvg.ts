@@ -101,9 +101,10 @@ function cleanStylesheet(text: string): string {
  * Очистка чужого SVG перед вставкой в страницу: остаются только разрешенные элементы SVG, текст и безопасные
  * атрибуты. Комментарии и инструкции обработки удаляются: при разборе как HTML они превращаются в элементы.
  * Обработчики on*, javascript:, внешние href и url(...) удаляются. Ссылки внутри файла (#id) остаются.
- * keepStyles: false — заодно удалить <style> (разметка компонентов, где стилей уже нет)
+ * keepStyles: false — заодно удалить <style> и классы (разметка компонентов: стили уже перенесены в атрибуты)
  */
 export function sanitizeSvg(root: Element, { keepStyles = true } = {}) {
+  if (!keepStyles) for (const el of Array.from(root.querySelectorAll('[class]'))) el.removeAttribute('class')
   const doc = root.ownerDocument
   // Обход без рекурсии: глубокая вложенность не переполнит стек
   const stack: Element[] = [root]
@@ -282,8 +283,8 @@ function expandUses(svg: SVGSVGElement) {
         if (vb && w > 0 && h > 0) parts.push(viewBoxTransform(vb, w, h))
       } else {
         content = target.cloneNode(true) as Element
-        content.removeAttribute('id')
       }
+      for (const el of [content, ...Array.from(content.querySelectorAll('[id]'))]) el.removeAttribute('id')
       const transform = parts.join(' ').trim()
       if (transform) g.setAttribute('transform', transform)
       g.appendChild(content)
@@ -359,6 +360,7 @@ export function prepareSvgText(text: string): { svgText: string; shapeCount: num
   document.body.appendChild(host)
   try {
     inlineStylesheets(svg)
+    for (const el of Array.from(svg.querySelectorAll('[class]'))) el.removeAttribute('class')
     expandUses(svg)
     flattenNestedSvgs(svg)
     ensureViewBox(svg)

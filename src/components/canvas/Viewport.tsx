@@ -355,7 +355,8 @@ export function Viewport() {
             fill="#ffffff"
             style={{ filter: 'drop-shadow(0 1px 3px rgb(0 0 0 / 0.14))' }}
           />
-          <g>
+          {/* color: как в отдельном SVG (экспорт, превью) — currentColor черный, а не цвет текста интерфейса */}
+          <g color="#000">
             {scene.objects.map((o) => {
               const c = components.get(o.componentId)
               return c ? <ObjectView key={o.id} obj={o} comp={c} interactive={!spaceDown} /> : null
