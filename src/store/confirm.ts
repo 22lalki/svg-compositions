@@ -7,7 +7,7 @@ export type ConfirmRequest = {
   confirmText: string
   danger?: boolean
   /** Поле ввода (диалог-вопрос): подпись и начальное значение */
-  input?: { label: string; value: string; placeholder?: string }
+  input?: { label: string; value: string; placeholder?: string; maxLength?: number; type?: 'text' | 'password' }
   resolve: (ok: boolean, value?: string) => void
   /** Номер запроса: новый диалог — новое поле ввода, а не старое с прежним текстом */
   id?: number

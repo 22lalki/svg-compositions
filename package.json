@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build:set": "node scripts/build-set.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.2.0",
     "idb-keyval": "^6.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

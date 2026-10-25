@@ -116,7 +116,9 @@ export function ConfirmHost() {
             defaultValue={request.input.value}
             placeholder={request.input.placeholder}
             aria-label={request.input.label}
-            maxLength={80}
+            maxLength={request.input.maxLength ?? 80}
+            type={request.input.type ?? 'text'}
+            autoComplete="off"
             onKeyDown={(e) => e.key === 'Enter' && close(true)}
             className="mt-3 h-9 w-full rounded-md border border-line px-2.5 text-sm outline-none focus:border-accent"
           />

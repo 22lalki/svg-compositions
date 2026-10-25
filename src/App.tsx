@@ -19,6 +19,7 @@ import { ExtractView } from './components/extract/ExtractView'
 import { ConfirmHost, Toasts } from './components/ui'
 import { ContextMenuHost } from './components/ContextMenu'
 import { FileDropOverlay } from './components/FileDropOverlay'
+import { ComposeView } from './compose/ui/ComposeView'
 
 const failed =
   <T,>(fallback: T) =>
@@ -102,31 +103,93 @@ function startSync(applyScene: (scene: Scene) => void) {
   })
 }
 
+type Mode = 'compose' | 'extract'
+const MODE_KEY = 'svg-constructor:mode'
+const readMode = (): Mode => {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'extract' ? 'extract' : 'compose'
+  } catch {
+    return 'compose'
+  }
+}
+
+/**
+ * Два режима: «Композиции» — автосборка из набора объектов (основной сценарий), и «Извлечение» — прежний
+ * конструктор: вырезать объекты из целых иллюстраций и собрать из них сцену вручную
+ */
 export function App() {
+  const [mode, setMode] = useState<Mode>(readMode)
+  const switchTo = (m: Mode) => {
+    setMode(m)
+    try {
+      localStorage.setItem(MODE_KEY, m)
+    } catch {
+      /* без localStorage режим просто не запоминается */
+    }
+  }
+  const tab = (m: Mode, label: string) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={mode === m}
+      onClick={() => switchTo(m)}
+      className={`h-12 border-b-2 px-3 text-sm transition-colors ${mode === m ? 'border-accent font-medium text-ink' : 'border-transparent text-muted hover:text-ink'}`}
+      data-testid={`mode-${m}`}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-panel px-4">
+        <img src="/favicon.svg" alt="" className="h-6 w-6" />
+        <h1 className="text-sm font-semibold">Конструктор векторных композиций</h1>
+        <nav className="ml-4 flex" role="tablist">
+          {tab('compose', 'Композиции')}
+          {tab('extract', 'Извлечение из иллюстраций')}
+        </nav>
+      </header>
+      <div className="min-h-0 flex-1">{mode === 'compose' ? <ComposeView /> : <ExtractWorkspace />}</div>
+      <Toasts />
+      <ContextMenuHost />
+      <ConfirmHost />
+    </div>
+  )
+}
+
+/** Прежний режим: исходники → выделение → библиотека → холст */
+/**
+ * Загрузка и подписки режима — один раз за жизнь страницы. При переключении вкладок компонент размонтируется,
+ * но сцена, история отмен и синхронизация с другими вкладками остаются: повторная загрузка сбросила бы историю
+ */
+let extractReady: Promise<void> | null = null
+function startExtract(): Promise<void> {
+  extractReady ??= bootstrap()
+    .then(() => {
+      const autosave = startAutosave()
+      startSync(autosave.applyExternal)
+    })
+    .catch((e: unknown) => {
+      extractReady = null // при следующем открытии вкладки — новая попытка
+      throw e
+    })
+  return extractReady
+}
+
+function ExtractWorkspace() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const extractSourceId = useUi((s) => s.extractSourceId)
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined
     let cancelled = false
-    bootstrap()
-      .then(() => {
-        if (cancelled) return
-        const autosave = startAutosave()
-        const stopSync = startSync(autosave.applyExternal)
-        unsubscribe = () => {
-          autosave.unsubscribe()
-          stopSync()
-        }
-        setStatus('ready')
-      })
+    startExtract()
+      .then(() => !cancelled && setStatus('ready'))
       .catch((e: unknown) => {
         console.error(e)
-        setStatus('error')
+        if (!cancelled) setStatus('error')
       })
     return () => {
       cancelled = true
-      unsubscribe?.()
     }
   }, [])
 
@@ -140,13 +203,6 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-panel px-4">
-        <img src="/favicon.svg" alt="" className="h-6 w-6" />
-        <h1 className="text-sm font-semibold">Конструктор векторных композиций</h1>
-        <span className="hidden text-xs text-muted lg:inline">
-          исходник → выделение → библиотека → холст → SVG
-        </span>
-      </header>
       <div className="flex min-h-0 flex-1">
         <aside className="w-56 shrink-0 border-r border-line bg-panel">
           <SourcesPanel />
@@ -158,10 +214,7 @@ export function App() {
           <LibraryPanel />
         </aside>
       </div>
-      <Toasts />
       <FileDropOverlay />
-      <ContextMenuHost />
-      <ConfirmHost />
     </div>
   )
 }
