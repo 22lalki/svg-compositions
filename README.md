@@ -7,8 +7,8 @@
 
 Объекты не генерируются и не меняются: сервис только ставит их в кадр, выбирает состояние (основной или фоновый вариант) и перекрашивает строго в цвета выбранной схемы. Результат — редактируемый SVG, который можно сразу вставить в Figma.
 
-- **Сервис:** https://svg-constructor.vercel.app
-- **Репозиторий:** https://github.com/22lalki/svg-constructor
+- **Сервис:** https://svg-compositions.vercel.app
+- **Репозиторий:** https://github.com/22lalki/svg-compositions
 - **Примеры композиций:** [examples/](examples/) (`compose-*.svg`, `compose-*.png`)
 
 ![Финансовая грамотность](examples/compose-1-finance.png)
@@ -211,7 +211,7 @@ scripts/compose-examples.mjs примеры композиций через UI �
 
 ## Деплой
 
-Сервис опубликован на https://svg-constructor.vercel.app. Проект статический, `vercel.json` уже настроен: framework `vite`, output `dist` и заголовки безопасности. В Content-Security-Policy разрешено только обращение к `https://api.anthropic.com` (режим ИИ).
+Сервис опубликован на https://svg-compositions.vercel.app. Проект статический, `vercel.json` уже настроен: framework `vite`, output `dist` и заголовки безопасности. В Content-Security-Policy разрешено только обращение к `https://api.anthropic.com` (режим ИИ).
 
 ```bash
 npx vercel          # первый раз — вход и привязка проекта
