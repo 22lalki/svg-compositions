@@ -89,6 +89,9 @@ const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   acceptDownloads: true,
 })
+// Сценарий проверяет режим «Извлечение из иллюстраций»; по умолчанию сервис открывается в режиме «Композиции»
+const extractMode = () => localStorage.setItem('svg-constructor:mode', 'extract')
+await context.addInitScript(extractMode)
 const page = await context.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
@@ -899,6 +902,7 @@ check('undo после удаления компонента не возвращ
 
   // Битые записи: отдельный браузерный профиль, в хранилище — мусор вперемешку с целыми записями
   const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await fresh.addInitScript(extractMode)
   const p = await fresh.newPage()
   await p.goto(BASE)
   await p.waitForSelector('[data-testid="canvas"] svg')
